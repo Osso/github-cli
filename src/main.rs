@@ -47,6 +47,11 @@ enum Commands {
         #[command(subcommand)]
         command: RepoCommands,
     },
+    /// Manage GitHub App installations
+    App {
+        #[command(subcommand)]
+        command: AppCommands,
+    },
     /// Manage Actions runners
     Runner {
         #[command(subcommand)]
@@ -101,6 +106,62 @@ enum PrCommands {
         repo: String,
         /// PR number
         number: u64,
+    },
+    /// Post a comment on a PR
+    Comment {
+        /// Repository (owner/repo)
+        repo: String,
+        /// PR number
+        number: u64,
+        /// Comment body
+        #[arg(short, long)]
+        message: String,
+    },
+    /// Approve a PR
+    Approve {
+        /// Repository (owner/repo)
+        repo: String,
+        /// PR number
+        number: u64,
+    },
+    /// List review comments (discussions) on a PR
+    Discussions {
+        /// Repository (owner/repo)
+        repo: String,
+        /// PR number
+        number: u64,
+        /// Show only unresolved threads
+        #[arg(long)]
+        unresolved: bool,
+    },
+    /// Reply to a review comment
+    Reply {
+        /// Repository (owner/repo)
+        repo: String,
+        /// PR number
+        number: u64,
+        /// Comment ID to reply to
+        #[arg(long)]
+        comment: u64,
+        /// Reply body
+        #[arg(short, long)]
+        message: String,
+    },
+    /// Submit a review with inline comments
+    Review {
+        /// Repository (owner/repo)
+        repo: String,
+        /// PR number
+        number: u64,
+        /// Review summary body
+        #[arg(short = 'b', long)]
+        body: Option<String>,
+        /// Review event: COMMENT, APPROVE, REQUEST_CHANGES
+        #[arg(short, long, default_value = "COMMENT")]
+        event: String,
+        /// Inline comment (repeatable): path:line:body
+        #[arg(long = "comment", short = 'c')]
+        comments: Vec<String>,
     },
 }
 
@@ -227,8 +288,27 @@ enum OrgCommands {
 
 #[derive(Subcommand)]
 enum RepoCommands {
+    /// Manage deploy keys
+    Keys {
+        #[command(subcommand)]
+        command: KeyCommands,
+    },
+    /// Manage webhooks
+    Hooks {
+        #[command(subcommand)]
+        command: HookCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum KeyCommands {
+    /// List deploy keys for a repository
+    List {
+        /// Repository (owner/repo)
+        repo: String,
+    },
     /// Add a deploy key to a repository
-    AddKey {
+    Add {
         /// Repository (owner/repo)
         repo: String,
         /// Key title
@@ -240,17 +320,30 @@ enum RepoCommands {
         #[arg(short, long)]
         write: bool,
     },
-    /// List deploy keys for a repository
-    Keys {
-        /// Repository (owner/repo)
-        repo: String,
-    },
     /// Remove a deploy key from a repository
-    RemoveKey {
+    Remove {
         /// Repository (owner/repo)
         repo: String,
         /// Key ID
         key_id: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookCommands {
+    /// List webhooks for a repository
+    List {
+        /// Repository (owner/repo)
+        repo: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum AppCommands {
+    /// List GitHub App installations for an organization
+    List {
+        /// Organization name
+        org: String,
     },
 }
 
@@ -426,6 +519,45 @@ impl Client {
         self.get(&path).await
     }
 
+    async fn comment_on_issue(&self, repo: &str, number: u64, body: &str) -> Result<serde_json::Value> {
+        let path = format!("/repos/{repo}/issues/{number}/comments");
+        self.post(&path, &serde_json::json!({ "body": body })).await
+    }
+
+    async fn approve_pr(&self, repo: &str, number: u64) -> Result<serde_json::Value> {
+        let path = format!("/repos/{repo}/pulls/{number}/reviews");
+        self.post(&path, &serde_json::json!({ "event": "APPROVE" })).await
+    }
+
+    async fn list_review_comments(&self, repo: &str, number: u64) -> Result<serde_json::Value> {
+        let path = format!("/repos/{repo}/pulls/{number}/comments?per_page=100");
+        self.get(&path).await
+    }
+
+    async fn create_review(
+        &self,
+        repo: &str,
+        number: u64,
+        event: &str,
+        body: Option<&str>,
+        comments: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let path = format!("/repos/{repo}/pulls/{number}/reviews");
+        let mut payload = serde_json::json!({ "event": event });
+        if let Some(b) = body {
+            payload["body"] = serde_json::json!(b);
+        }
+        if !comments.is_empty() {
+            payload["comments"] = serde_json::json!(comments);
+        }
+        self.post(&path, &payload).await
+    }
+
+    async fn reply_to_review_comment(&self, repo: &str, _number: u64, comment_id: u64, body: &str) -> Result<serde_json::Value> {
+        let path = format!("/repos/{repo}/pulls/comments/{comment_id}/replies");
+        self.post(&path, &serde_json::json!({ "body": body })).await
+    }
+
     async fn put(&self, path: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
         let url = format!("https://api.github.com{path}");
         let resp = self.http.put(&url).json(body).send().await?;
@@ -553,6 +685,16 @@ impl Client {
     async fn remove_deploy_key(&self, repo: &str, key_id: u64) -> Result<()> {
         let path = format!("/repos/{repo}/keys/{key_id}");
         self.delete(&path).await
+    }
+
+    async fn list_repo_hooks(&self, repo: &str) -> Result<serde_json::Value> {
+        let path = format!("/repos/{repo}/hooks");
+        self.get(&path).await
+    }
+
+    async fn list_org_installations(&self, org: &str) -> Result<serde_json::Value> {
+        let path = format!("/orgs/{org}/installations");
+        self.get(&path).await
     }
 
     // Runner operations
@@ -758,6 +900,59 @@ fn print_deploy_keys(value: &serde_json::Value) {
     }
 }
 
+fn print_hooks(value: &serde_json::Value) {
+    if let Some(hooks) = value.as_array() {
+        if hooks.is_empty() {
+            println!("No webhooks found");
+            return;
+        }
+        for hook in hooks {
+            let id = hook["id"].as_u64().unwrap_or(0);
+            let name = hook["name"].as_str().unwrap_or("");
+            let active = hook["active"].as_bool().unwrap_or(false);
+            let url = hook["config"]["url"].as_str().unwrap_or("");
+            let events: Vec<&str> = hook["events"]
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|e| e.as_str()).collect())
+                .unwrap_or_default();
+            let status = if active { "active" } else { "inactive" };
+            println!("{id:<10} {name:<15} [{status}] {url}");
+            if !events.is_empty() {
+                println!("           Events: {}", events.join(", "));
+            }
+        }
+    }
+}
+
+fn print_org_installations(value: &serde_json::Value) {
+    let installations = value["installations"].as_array();
+    let total = value["total_count"].as_u64().unwrap_or(0);
+
+    if let Some(installations) = installations {
+        if installations.is_empty() {
+            println!("No GitHub App installations found");
+            return;
+        }
+        println!("Total: {total}");
+        for app in installations {
+            let id = app["id"].as_u64().unwrap_or(0);
+            let app_id = app["app_id"].as_u64().unwrap_or(0);
+            let app_slug = app["app_slug"].as_str().unwrap_or("");
+            let target_type = app["target_type"].as_str().unwrap_or("");
+            let permissions: Vec<String> = app["permissions"]
+                .as_object()
+                .map(|obj| obj.iter().map(|(k, v)| format!("{}:{}", k, v.as_str().unwrap_or(""))).collect())
+                .unwrap_or_default();
+            println!("{id:<10} {app_slug:<30} (app_id: {app_id}) target: {target_type}");
+            if !permissions.is_empty() {
+                println!("           Permissions: {}", permissions.join(", "));
+            }
+        }
+    } else {
+        println!("No installations found or insufficient permissions");
+    }
+}
+
 fn print_runners(value: &serde_json::Value) {
     let runners = value["runners"].as_array();
     let total = value["total_count"].as_u64().unwrap_or(0);
@@ -869,6 +1064,67 @@ async fn main() -> Result<()> {
                     let result = client.get_pr(&repo, number).await?;
                     print_issue_detail(&result);
                 }
+                PrCommands::Comment { repo, number, message } => {
+                    let result = client.comment_on_issue(&repo, number, &message).await?;
+                    let id = result["id"].as_u64().unwrap_or(0);
+                    println!("Posted comment (id: {id}) on {repo}#{number}");
+                }
+                PrCommands::Approve { repo, number } => {
+                    client.approve_pr(&repo, number).await?;
+                    println!("Approved {repo}#{number}");
+                }
+                PrCommands::Discussions { repo, number, unresolved: _ } => {
+                    let result = client.list_review_comments(&repo, number).await?;
+                    if let Some(comments) = result.as_array() {
+                        if comments.is_empty() {
+                            println!("No review comments");
+                        } else {
+                            for c in comments {
+                                let id = c["id"].as_u64().unwrap_or(0);
+                                let path = c["path"].as_str().unwrap_or("?");
+                                let line = c["line"].as_u64().unwrap_or(0);
+                                let author = c["user"]["login"].as_str().unwrap_or("?");
+                                let body = c["body"].as_str().unwrap_or("");
+                                println!("{id:<10} {path}:{line} @{author}");
+                                println!("  {body}");
+                                println!();
+                            }
+                        }
+                    }
+                }
+                PrCommands::Reply { repo, number, comment, message } => {
+                    let result = client.reply_to_review_comment(&repo, number, comment, &message).await?;
+                    let id = result["id"].as_u64().unwrap_or(0);
+                    println!("Posted reply (id: {id}) to comment {comment}");
+                }
+                PrCommands::Review { repo, number, body, event, comments } => {
+                    let inline_comments: Vec<serde_json::Value> = comments
+                        .iter()
+                        .map(|c| {
+                            // Format: path:line:body
+                            let mut parts = c.splitn(3, ':');
+                            let path = parts.next().unwrap_or("");
+                            let line: u64 = parts.next().unwrap_or("0").parse().unwrap_or(0);
+                            let comment_body = parts.next().unwrap_or("");
+                            serde_json::json!({
+                                "path": path,
+                                "line": line,
+                                "side": "RIGHT",
+                                "body": comment_body
+                            })
+                        })
+                        .collect();
+                    let event_upper = event.to_uppercase();
+                    let result = client.create_review(
+                        &repo,
+                        number,
+                        &event_upper,
+                        body.as_deref(),
+                        inline_comments,
+                    ).await?;
+                    let review_id = result["id"].as_u64().unwrap_or(0);
+                    println!("Submitted review (id: {review_id}) on {repo}#{number} [{event_upper}]");
+                }
             }
         }
         Commands::Team { command } => {
@@ -937,25 +1193,41 @@ async fn main() -> Result<()> {
         Commands::Repo { command } => {
             let client = get_client(&config)?;
             match command {
-                RepoCommands::AddKey { repo, title, key, write } => {
-                    // Check if key is a file path
-                    let key_content = if std::path::Path::new(&key).exists() {
-                        std::fs::read_to_string(&key)?.trim().to_string()
-                    } else {
-                        key
-                    };
-                    let result = client.add_deploy_key(&repo, &title, &key_content, !write).await?;
-                    let id = result["id"].as_u64().unwrap_or(0);
-                    let access = if write { "read-write" } else { "read-only" };
-                    println!("Added deploy key '{}' (id: {}) to {} [{}]", title, id, repo, access);
+                RepoCommands::Keys { command } => match command {
+                    KeyCommands::List { repo } => {
+                        let result = client.list_deploy_keys(&repo).await?;
+                        print_deploy_keys(&result);
+                    }
+                    KeyCommands::Add { repo, title, key, write } => {
+                        let key_content = if std::path::Path::new(&key).exists() {
+                            std::fs::read_to_string(&key)?.trim().to_string()
+                        } else {
+                            key
+                        };
+                        let result = client.add_deploy_key(&repo, &title, &key_content, !write).await?;
+                        let id = result["id"].as_u64().unwrap_or(0);
+                        let access = if write { "read-write" } else { "read-only" };
+                        println!("Added deploy key '{}' (id: {}) to {} [{}]", title, id, repo, access);
+                    }
+                    KeyCommands::Remove { repo, key_id } => {
+                        client.remove_deploy_key(&repo, key_id).await?;
+                        println!("Removed deploy key {} from {}", key_id, repo);
+                    }
                 }
-                RepoCommands::Keys { repo } => {
-                    let result = client.list_deploy_keys(&repo).await?;
-                    print_deploy_keys(&result);
+                RepoCommands::Hooks { command } => match command {
+                    HookCommands::List { repo } => {
+                        let result = client.list_repo_hooks(&repo).await?;
+                        print_hooks(&result);
+                    }
                 }
-                RepoCommands::RemoveKey { repo, key_id } => {
-                    client.remove_deploy_key(&repo, key_id).await?;
-                    println!("Removed deploy key {} from {}", key_id, repo);
+            }
+        }
+        Commands::App { command } => {
+            let client = get_client(&config)?;
+            match command {
+                AppCommands::List { org } => {
+                    let result = client.list_org_installations(&org).await?;
+                    print_org_installations(&result);
                 }
             }
         }
