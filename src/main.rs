@@ -18,6 +18,7 @@ use commands::run::RunCommands;
 use commands::runner::RunnerCommands;
 use commands::secret::SecretCommands;
 use commands::team::TeamCommands;
+use commands::webhook::WebhookCommands;
 
 #[derive(Parser)]
 #[command(name = "github", about = "GitHub CLI")]
@@ -87,6 +88,11 @@ enum Commands {
     Secret {
         #[command(subcommand)]
         command: SecretCommands,
+    },
+    /// Manage repository webhooks
+    Webhook {
+        #[command(subcommand)]
+        command: WebhookCommands,
     },
     /// Configure token
     Config {
@@ -172,6 +178,9 @@ async fn main() -> Result<()> {
         }
         Commands::Secret { command } => {
             commands::secret::handle(&get_client(&config)?, command).await?;
+        }
+        Commands::Webhook { command } => {
+            commands::webhook::handle(&get_client(&config)?, command).await?;
         }
     }
 
