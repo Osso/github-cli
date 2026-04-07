@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::Subcommand;
 use std::io::Read;
 
@@ -61,24 +61,41 @@ pub enum RunCommands {
 
 pub async fn handle(client: &Client, command: RunCommands) -> Result<()> {
     match command {
-        RunCommands::List { repo, limit, status, branch, workflow } => {
-            let result = list_runs(client, &repo, limit, status.as_deref(), branch.as_deref()).await?;
+        RunCommands::List {
+            repo,
+            limit,
+            status,
+            branch,
+            workflow,
+        } => {
+            let result =
+                list_runs(client, &repo, limit, status.as_deref(), branch.as_deref()).await?;
             let workflow_filter = workflow.as_deref();
             print_runs(&result, workflow_filter, limit);
         }
         RunCommands::View { repo, run_id } => {
-            let run = client.get(&format!("/repos/{repo}/actions/runs/{run_id}")).await?;
-            let jobs = client.get(&format!("/repos/{repo}/actions/runs/{run_id}/jobs")).await?;
+            let run = client
+                .get(&format!("/repos/{repo}/actions/runs/{run_id}"))
+                .await?;
+            let jobs = client
+                .get(&format!("/repos/{repo}/actions/runs/{run_id}/jobs"))
+                .await?;
             print_run_detail(&run, &jobs);
         }
         RunCommands::Logs { repo, run_id, job } => {
             show_logs(client, &repo, run_id, job.as_deref()).await?;
         }
         RunCommands::Cancel { repo, run_id } => {
-            client.post_empty(&format!("/repos/{repo}/actions/runs/{run_id}/cancel")).await?;
+            client
+                .post_empty(&format!("/repos/{repo}/actions/runs/{run_id}/cancel"))
+                .await?;
             println!("Cancelled run {run_id}");
         }
-        RunCommands::Rerun { repo, run_id, failed } => {
+        RunCommands::Rerun {
+            repo,
+            run_id,
+            failed,
+        } => {
             let path = if failed {
                 format!("/repos/{repo}/actions/runs/{run_id}/rerun-failed-jobs")
             } else {
@@ -167,8 +184,7 @@ fn print_runs(value: &serde_json::Value, workflow_filter: Option<&str>, limit: u
         let workflow_name = run["name"].as_str().unwrap_or("");
         let workflow_file = run["path"].as_str().unwrap_or("");
         if let Some(filter) = workflow_filter {
-            let matches = workflow_name.contains(filter)
-                || workflow_file.contains(filter);
+            let matches = workflow_name.contains(filter) || workflow_file.contains(filter);
             if !matches {
                 continue;
             }
@@ -183,10 +199,19 @@ fn print_runs(value: &serde_json::Value, workflow_filter: Option<&str>, limit: u
         let conclusion = run["conclusion"].as_str().unwrap_or("-");
         let branch = run["head_branch"].as_str().unwrap_or("-");
         let event = run["event"].as_str().unwrap_or("-");
-        let created = run["created_at"].as_str().unwrap_or("").split('T').next().unwrap_or("-");
+        let created = run["created_at"]
+            .as_str()
+            .unwrap_or("")
+            .split('T')
+            .next()
+            .unwrap_or("-");
         let started = run["run_started_at"].as_str().unwrap_or("");
         let updated = run["updated_at"].as_str().unwrap_or("");
-        let duration = if started.is_empty() { "-".to_string() } else { duration_between(started, updated) };
+        let duration = if started.is_empty() {
+            "-".to_string()
+        } else {
+            duration_between(started, updated)
+        };
 
         let name_truncated = if workflow_name.len() > 29 {
             format!("{}…", &workflow_name[..28])
@@ -216,7 +241,11 @@ fn print_run_detail(run: &serde_json::Value, jobs_value: &serde_json::Value) {
     let created = run["created_at"].as_str().unwrap_or("-");
     let started = run["run_started_at"].as_str().unwrap_or("");
     let updated = run["updated_at"].as_str().unwrap_or("");
-    let duration = if started.is_empty() { "-".to_string() } else { duration_between(started, updated) };
+    let duration = if started.is_empty() {
+        "-".to_string()
+    } else {
+        duration_between(started, updated)
+    };
     let url = run["html_url"].as_str().unwrap_or("");
 
     println!("Run: {name} (#{id})");
@@ -233,7 +262,10 @@ fn print_run_detail(run: &serde_json::Value, jobs_value: &serde_json::Value) {
         return;
     }
 
-    println!("{:<40} {:<12} {:<12} {}", "Job", "Status", "Conclusion", "Duration");
+    println!(
+        "{:<40} {:<12} {:<12} {}",
+        "Job", "Status", "Conclusion", "Duration"
+    );
     println!("{}", "-".repeat(80));
     for job in jobs {
         let job_name = job["name"].as_str().unwrap_or("-");
@@ -251,12 +283,22 @@ fn print_run_detail(run: &serde_json::Value, jobs_value: &serde_json::Value) {
         } else {
             job_name.to_string()
         };
-        println!("{:<40} {:<12} {:<12} {}", name_truncated, job_status, job_conclusion, job_duration);
+        println!(
+            "{:<40} {:<12} {:<12} {}",
+            name_truncated, job_status, job_conclusion, job_duration
+        );
     }
 }
 
-async fn show_logs(client: &Client, repo: &str, run_id: u64, job_filter: Option<&str>) -> Result<()> {
-    let jobs_value = client.get(&format!("/repos/{repo}/actions/runs/{run_id}/jobs")).await?;
+async fn show_logs(
+    client: &Client,
+    repo: &str,
+    run_id: u64,
+    job_filter: Option<&str>,
+) -> Result<()> {
+    let jobs_value = client
+        .get(&format!("/repos/{repo}/actions/runs/{run_id}/jobs"))
+        .await?;
     let empty = vec![];
     let jobs = jobs_value["jobs"].as_array().unwrap_or(&empty);
 
@@ -287,7 +329,9 @@ async fn show_logs(client: &Client, repo: &str, run_id: u64, job_filter: Option<
         let job_id = job["id"].as_u64().unwrap_or(0);
         let job_name = job["name"].as_str().unwrap_or("?");
         println!("=== Job: {job_name} (id: {job_id}) ===");
-        let log_bytes = client.get_bytes(&format!("/repos/{repo}/actions/jobs/{job_id}/logs")).await?;
+        let log_bytes = client
+            .get_bytes(&format!("/repos/{repo}/actions/jobs/{job_id}/logs"))
+            .await?;
         extract_and_print_logs(&log_bytes, job_name)?;
         println!();
     }

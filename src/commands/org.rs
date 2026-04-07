@@ -46,8 +46,16 @@ pub enum OrgCommands {
 
 pub async fn handle(client: &Client, command: OrgCommands) -> Result<()> {
     match command {
-        OrgCommands::Create { name, billing_email } => create_org(client, &name, &billing_email).await,
-        OrgCommands::Invite { org, email, role, teams } => invite_member(client, &org, &email, &role, teams).await,
+        OrgCommands::Create {
+            name,
+            billing_email,
+        } => create_org(client, &name, &billing_email).await,
+        OrgCommands::Invite {
+            org,
+            email,
+            role,
+            teams,
+        } => invite_member(client, &org, &email, &role, teams).await,
         OrgCommands::Invitations { org, limit } => list_invitations(client, &org, limit).await,
         OrgCommands::Members { org, limit } => list_members(client, &org, limit).await,
     }
@@ -66,7 +74,13 @@ async fn create_org(client: &Client, name: &str, billing_email: &str) -> Result<
     Ok(())
 }
 
-async fn invite_member(client: &Client, org: &str, email: &str, role: &str, teams: Option<String>) -> Result<()> {
+async fn invite_member(
+    client: &Client,
+    org: &str,
+    email: &str,
+    role: &str,
+    teams: Option<String>,
+) -> Result<()> {
     let team_ids = teams.map(|t| {
         t.split(',')
             .filter_map(|s| s.trim().parse::<u64>().ok())
@@ -76,20 +90,26 @@ async fn invite_member(client: &Client, org: &str, email: &str, role: &str, team
     if let Some(ids) = team_ids {
         body["team_ids"] = serde_json::json!(ids);
     }
-    let result = client.post(&format!("/orgs/{org}/invitations"), &body).await?;
+    let result = client
+        .post(&format!("/orgs/{org}/invitations"), &body)
+        .await?;
     let id = result["id"].as_u64().unwrap_or(0);
     println!("Invitation sent to {email} (id: {id})");
     Ok(())
 }
 
 async fn list_invitations(client: &Client, org: &str, limit: u32) -> Result<()> {
-    let result = client.get(&format!("/orgs/{org}/invitations?per_page={limit}")).await?;
+    let result = client
+        .get(&format!("/orgs/{org}/invitations?per_page={limit}"))
+        .await?;
     print_org_invitations(&result);
     Ok(())
 }
 
 async fn list_members(client: &Client, org: &str, limit: u32) -> Result<()> {
-    let result = client.get(&format!("/orgs/{org}/members?per_page={limit}")).await?;
+    let result = client
+        .get(&format!("/orgs/{org}/members?per_page={limit}"))
+        .await?;
     print_org_members(&result);
     Ok(())
 }
@@ -104,7 +124,12 @@ fn print_org_invitations(value: &serde_json::Value) {
             let email = inv["email"].as_str().unwrap_or("");
             let login = inv["login"].as_str().unwrap_or("-");
             let role = inv["role"].as_str().unwrap_or("");
-            let created = inv["created_at"].as_str().unwrap_or("").split('T').next().unwrap_or("");
+            let created = inv["created_at"]
+                .as_str()
+                .unwrap_or("")
+                .split('T')
+                .next()
+                .unwrap_or("");
             println!("{email:<40} {login:<20} {role:<15} {created}");
         }
     }

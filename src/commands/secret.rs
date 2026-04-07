@@ -1,7 +1,7 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use base64::Engine;
 use clap::Subcommand;
-use crypto_box::{aead::OsRng, PublicKey};
+use crypto_box::{PublicKey, aead::OsRng};
 
 use crate::client::Client;
 
@@ -33,7 +33,9 @@ pub enum SecretCommands {
 pub async fn handle(client: &Client, command: SecretCommands) -> Result<()> {
     match command {
         SecretCommands::List { repo } => {
-            let result = client.get(&format!("/repos/{repo}/actions/secrets")).await?;
+            let result = client
+                .get(&format!("/repos/{repo}/actions/secrets"))
+                .await?;
             print_secrets(&result);
         }
         SecretCommands::Set { repo, name, value } => {
@@ -50,7 +52,9 @@ pub async fn handle(client: &Client, command: SecretCommands) -> Result<()> {
             println!("Set secret '{name}' in {repo}");
         }
         SecretCommands::Delete { repo, name } => {
-            client.delete(&format!("/repos/{repo}/actions/secrets/{name}")).await?;
+            client
+                .delete(&format!("/repos/{repo}/actions/secrets/{name}"))
+                .await?;
             println!("Deleted secret '{name}' from {repo}");
         }
     }
@@ -90,7 +94,10 @@ async fn encrypt_secret(client: &Client, repo: &str, value: &str) -> Result<Encr
         .map_err(|e| anyhow::anyhow!("Encryption failed: {e}"))?;
     let ciphertext_b64 = base64::engine::general_purpose::STANDARD.encode(ciphertext);
 
-    Ok(EncryptedSecret { ciphertext_b64, key_id })
+    Ok(EncryptedSecret {
+        ciphertext_b64,
+        key_id,
+    })
 }
 
 fn print_secrets(value: &serde_json::Value) {

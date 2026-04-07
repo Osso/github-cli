@@ -35,7 +35,16 @@ pub enum CodeCommands {
 
 pub async fn handle(client: &Client, command: CodeCommands) -> Result<()> {
     match command {
-        CodeCommands::Search { query, language, repo, org, path, filename, limit, page } => {
+        CodeCommands::Search {
+            query,
+            language,
+            repo,
+            org,
+            path,
+            filename,
+            limit,
+            page,
+        } => {
             let q = build_query(query, language, repo, org, path, filename);
             let result = client.search_code(&q, limit, page).await?;
             print_code_results(&result);

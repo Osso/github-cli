@@ -108,30 +108,45 @@ pub async fn handle(client: &Client, command: RepoCommands) -> Result<()> {
         RepoCommands::Protect { command } => handle_protect(client, command).await,
         RepoCommands::Keys { command } => handle_keys(client, command).await,
         RepoCommands::Hooks { command } => handle_hooks(client, command).await,
-        RepoCommands::Transfer { repo, new_owner } => transfer_repo(client, &repo, &new_owner).await,
+        RepoCommands::Transfer { repo, new_owner } => {
+            transfer_repo(client, &repo, &new_owner).await
+        }
     }
 }
 
 async fn list_repos(client: &Client, org: &str) -> Result<()> {
-    let result = client.get(&format!("/orgs/{org}/repos?per_page=100&sort=full_name")).await?;
+    let result = client
+        .get(&format!("/orgs/{org}/repos?per_page=100&sort=full_name"))
+        .await?;
     print_repos(&result);
     Ok(())
 }
 
 async fn list_branches(client: &Client, repo: &str) -> Result<()> {
-    let result = client.get(&format!("/repos/{repo}/branches?per_page=100")).await?;
+    let result = client
+        .get(&format!("/repos/{repo}/branches?per_page=100"))
+        .await?;
     print_branches(&result);
     Ok(())
 }
 
 async fn handle_protect(client: &Client, command: ProtectCommands) -> Result<()> {
     match command {
-        ProtectCommands::Set { repo, branch, check } => set_protection(client, &repo, &branch, &check).await,
+        ProtectCommands::Set {
+            repo,
+            branch,
+            check,
+        } => set_protection(client, &repo, &branch, &check).await,
         ProtectCommands::Get { repo, branch } => get_protection(client, &repo, &branch).await,
     }
 }
 
-async fn set_protection(client: &Client, repo: &str, branch: &str, checks: &[String]) -> Result<()> {
+async fn set_protection(
+    client: &Client,
+    repo: &str,
+    branch: &str,
+    checks: &[String],
+) -> Result<()> {
     let status_checks = if checks.is_empty() {
         serde_json::Value::Null
     } else {
@@ -147,7 +162,12 @@ async fn set_protection(client: &Client, repo: &str, branch: &str, checks: &[Str
         "block_creations": false,
         "lock_branch": false,
     });
-    client.put(&format!("/repos/{repo}/branches/{branch}/protection"), &body).await?;
+    client
+        .put(
+            &format!("/repos/{repo}/branches/{branch}/protection"),
+            &body,
+        )
+        .await?;
     println!("Protected {repo}:{branch} (enforce admins, no force push, no deletion)");
     if !checks.is_empty() {
         println!("Required checks: {}", checks.join(", "));
@@ -156,7 +176,10 @@ async fn set_protection(client: &Client, repo: &str, branch: &str, checks: &[Str
 }
 
 async fn get_protection(client: &Client, repo: &str, branch: &str) -> Result<()> {
-    match client.get(&format!("/repos/{repo}/branches/{branch}/protection")).await {
+    match client
+        .get(&format!("/repos/{repo}/branches/{branch}/protection"))
+        .await
+    {
         Ok(result) => print_protection(&result),
         Err(e) if e.to_string().contains("404") => {
             println!("No branch protection rules for {repo}:{branch}");
@@ -172,18 +195,31 @@ async fn handle_keys(client: &Client, command: KeyCommands) -> Result<()> {
             let result = client.get(&format!("/repos/{repo}/keys")).await?;
             print_deploy_keys(&result);
         }
-        KeyCommands::Add { repo, title, key, write } => {
+        KeyCommands::Add {
+            repo,
+            title,
+            key,
+            write,
+        } => {
             add_deploy_key(client, &repo, &title, &key, write).await?;
         }
         KeyCommands::Remove { repo, key_id } => {
-            client.delete(&format!("/repos/{repo}/keys/{key_id}")).await?;
+            client
+                .delete(&format!("/repos/{repo}/keys/{key_id}"))
+                .await?;
             println!("Removed deploy key {key_id} from {repo}");
         }
     }
     Ok(())
 }
 
-async fn add_deploy_key(client: &Client, repo: &str, title: &str, key: &str, write: bool) -> Result<()> {
+async fn add_deploy_key(
+    client: &Client,
+    repo: &str,
+    title: &str,
+    key: &str,
+    write: bool,
+) -> Result<()> {
     let key_content = if std::path::Path::new(key).exists() {
         std::fs::read_to_string(key)?.trim().to_string()
     } else {
@@ -209,49 +245,76 @@ async fn handle_hooks(client: &Client, command: HookCommands) -> Result<()> {
 
 async fn transfer_repo(client: &Client, repo: &str, new_owner: &str) -> Result<()> {
     let body = serde_json::json!({ "new_owner": new_owner });
-    let result = client.post(&format!("/repos/{repo}/transfer"), &body).await?;
+    let result = client
+        .post(&format!("/repos/{repo}/transfer"), &body)
+        .await?;
     let full_name = result["full_name"].as_str().unwrap_or(repo);
     println!("Transferred to {full_name}");
     Ok(())
 }
 
 fn print_repos(value: &serde_json::Value) {
-    let Some(repos) = value.as_array() else { return };
+    let Some(repos) = value.as_array() else {
+        return;
+    };
     if repos.is_empty() {
         println!("No repositories found");
         return;
     }
     for repo in repos {
         let name = repo["name"].as_str().unwrap_or("");
-        let archived = if repo["archived"].as_bool().unwrap_or(false) { " [archived]" } else { "" };
+        let archived = if repo["archived"].as_bool().unwrap_or(false) {
+            " [archived]"
+        } else {
+            ""
+        };
         let default_branch = repo["default_branch"].as_str().unwrap_or("");
-        let private = if repo["private"].as_bool().unwrap_or(false) { "private" } else { "public" };
+        let private = if repo["private"].as_bool().unwrap_or(false) {
+            "private"
+        } else {
+            "public"
+        };
         println!("{name:<30} {default_branch:<10} [{private}]{archived}");
     }
 }
 
 fn print_branches(value: &serde_json::Value) {
-    let Some(branches) = value.as_array() else { return };
+    let Some(branches) = value.as_array() else {
+        return;
+    };
     if branches.is_empty() {
         println!("No branches found");
         return;
     }
     for branch in branches {
         let name = branch["name"].as_str().unwrap_or("");
-        let protected = if branch["protected"].as_bool().unwrap_or(false) { " [protected]" } else { "" };
+        let protected = if branch["protected"].as_bool().unwrap_or(false) {
+            " [protected]"
+        } else {
+            ""
+        };
         println!("{name}{protected}");
     }
 }
 
 fn print_protection(value: &serde_json::Value) {
-    let enforce_admins = value["enforce_admins"]["enabled"].as_bool().unwrap_or(false);
-    let force_pushes = value["allow_force_pushes"]["enabled"].as_bool().unwrap_or(false);
-    let deletions = value["allow_deletions"]["enabled"].as_bool().unwrap_or(false);
+    let enforce_admins = value["enforce_admins"]["enabled"]
+        .as_bool()
+        .unwrap_or(false);
+    let force_pushes = value["allow_force_pushes"]["enabled"]
+        .as_bool()
+        .unwrap_or(false);
+    let deletions = value["allow_deletions"]["enabled"]
+        .as_bool()
+        .unwrap_or(false);
     println!("Enforce admins: {enforce_admins}");
     println!("Allow force pushes: {force_pushes}");
     println!("Allow deletions: {deletions}");
     if let Some(checks) = value["required_status_checks"].as_object() {
-        let strict = checks.get("strict").and_then(|v| v.as_bool()).unwrap_or(false);
+        let strict = checks
+            .get("strict")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         println!("Required status checks (strict: {strict})");
     }
     if value["required_pull_request_reviews"].is_object() {
@@ -269,14 +332,21 @@ fn print_deploy_keys(value: &serde_json::Value) {
         let id = key["id"].as_u64().unwrap_or(0);
         let title = key["title"].as_str().unwrap_or("");
         let read_only = key["read_only"].as_bool().unwrap_or(true);
-        let created = key["created_at"].as_str().unwrap_or("").split('T').next().unwrap_or("");
+        let created = key["created_at"]
+            .as_str()
+            .unwrap_or("")
+            .split('T')
+            .next()
+            .unwrap_or("");
         let access = if read_only { "read-only" } else { "read-write" };
         println!("{id:<10} {title:<30} [{access}] {created}");
     }
 }
 
 fn print_hooks(value: &serde_json::Value) {
-    let Some(hooks) = value.as_array() else { return };
+    let Some(hooks) = value.as_array() else {
+        return;
+    };
     if hooks.is_empty() {
         println!("No webhooks found");
         return;

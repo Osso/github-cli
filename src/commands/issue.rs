@@ -34,7 +34,11 @@ pub enum IssueCommands {
 
 pub async fn handle(client: &Client, command: IssueCommands) -> Result<()> {
     match command {
-        IssueCommands::List { repo, search, limit } => {
+        IssueCommands::List {
+            repo,
+            search,
+            limit,
+        } => {
             let result = if let Some(query) = search {
                 search_issues(client, &repo, &query, limit).await?
             } else {
@@ -64,12 +68,21 @@ async fn get_issue(client: &Client, repo: &str, number: u64) -> Result<serde_jso
     client.get(&path).await
 }
 
-async fn list_issue_comments(client: &Client, repo: &str, number: u64) -> Result<serde_json::Value> {
+async fn list_issue_comments(
+    client: &Client,
+    repo: &str,
+    number: u64,
+) -> Result<serde_json::Value> {
     let path = format!("/repos/{repo}/issues/{number}/comments?per_page=100");
     client.get(&path).await
 }
 
-async fn search_issues(client: &Client, repo: &str, query: &str, limit: u32) -> Result<serde_json::Value> {
+async fn search_issues(
+    client: &Client,
+    repo: &str,
+    query: &str,
+    limit: u32,
+) -> Result<serde_json::Value> {
     let search_query = format!("repo:{repo} {query}");
     let q = urlencoding::encode(&search_query);
     let path = format!("/search/issues?q={q}&per_page={limit}");
@@ -111,7 +124,12 @@ pub fn print_issue_comments(value: &serde_json::Value) {
         for c in comments {
             let id = c["id"].as_u64().unwrap_or(0);
             let author = c["user"]["login"].as_str().unwrap_or("?");
-            let created = c["created_at"].as_str().unwrap_or("").split('T').next().unwrap_or("");
+            let created = c["created_at"]
+                .as_str()
+                .unwrap_or("")
+                .split('T')
+                .next()
+                .unwrap_or("");
             let body = c["body"].as_str().unwrap_or("");
             let url = c["html_url"].as_str().unwrap_or("");
             println!("#{id} @{author} ({created})");

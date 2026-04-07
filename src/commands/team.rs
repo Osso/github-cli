@@ -94,11 +94,27 @@ pub enum TeamCommands {
 pub async fn handle(client: &Client, command: TeamCommands) -> Result<()> {
     match command {
         TeamCommands::List { org, limit } => {
-            let result = client.get(&format!("/orgs/{org}/teams?per_page={limit}")).await?;
+            let result = client
+                .get(&format!("/orgs/{org}/teams?per_page={limit}"))
+                .await?;
             print_teams(&result);
         }
-        TeamCommands::Create { org, name, description, privacy, parent_team_id } => {
-            let result = create_team(client, &org, &name, description.as_deref(), &privacy, parent_team_id).await?;
+        TeamCommands::Create {
+            org,
+            name,
+            description,
+            privacy,
+            parent_team_id,
+        } => {
+            let result = create_team(
+                client,
+                &org,
+                &name,
+                description.as_deref(),
+                &privacy,
+                parent_team_id,
+            )
+            .await?;
             let slug = result["slug"].as_str().unwrap_or("");
             let id = result["id"].as_u64().unwrap_or(0);
             println!("Created team '{name}' (slug: {slug}, id: {id})");
@@ -108,26 +124,52 @@ pub async fn handle(client: &Client, command: TeamCommands) -> Result<()> {
             print_team_detail(&result);
         }
         TeamCommands::Members { org, team, limit } => {
-            let result = client.get(&format!("/orgs/{org}/teams/{team}/members?per_page={limit}")).await?;
+            let result = client
+                .get(&format!(
+                    "/orgs/{org}/teams/{team}/members?per_page={limit}"
+                ))
+                .await?;
             print_team_members(&result);
         }
-        TeamCommands::AddMember { org, team, username, role } => {
+        TeamCommands::AddMember {
+            org,
+            team,
+            username,
+            role,
+        } => {
             let path = format!("/orgs/{org}/teams/{team}/memberships/{username}");
-            let result = client.put(&path, &serde_json::json!({ "role": role })).await?;
+            let result = client
+                .put(&path, &serde_json::json!({ "role": role }))
+                .await?;
             let state = result["state"].as_str().unwrap_or("added");
             println!("User '{username}' {state} to team '{team}' as {role}");
         }
-        TeamCommands::RemoveMember { org, team, username } => {
-            client.delete(&format!("/orgs/{org}/teams/{team}/memberships/{username}")).await?;
+        TeamCommands::RemoveMember {
+            org,
+            team,
+            username,
+        } => {
+            client
+                .delete(&format!("/orgs/{org}/teams/{team}/memberships/{username}"))
+                .await?;
             println!("Removed '{username}' from team '{team}'");
         }
-        TeamCommands::AddRepo { org, team, repo, permission } => {
+        TeamCommands::AddRepo {
+            org,
+            team,
+            repo,
+            permission,
+        } => {
             let path = format!("/orgs/{org}/teams/{team}/repos/{repo}");
-            client.put(&path, &serde_json::json!({ "permission": permission })).await?;
+            client
+                .put(&path, &serde_json::json!({ "permission": permission }))
+                .await?;
             println!("Added repo '{repo}' to team '{team}' with {permission} permission");
         }
         TeamCommands::Repos { org, team, limit } => {
-            let result = client.get(&format!("/orgs/{org}/teams/{team}/repos?per_page={limit}")).await?;
+            let result = client
+                .get(&format!("/orgs/{org}/teams/{team}/repos?per_page={limit}"))
+                .await?;
             print_team_repos(&result);
         }
     }

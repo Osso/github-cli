@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 pub struct Client {
     pub http: reqwest::Client,
@@ -98,11 +98,14 @@ impl Client {
         Ok(resp.bytes().await?)
     }
 
-    pub async fn search_code(&self, query: &str, limit: u32, page: u32) -> Result<serde_json::Value> {
+    pub async fn search_code(
+        &self,
+        query: &str,
+        limit: u32,
+        page: u32,
+    ) -> Result<serde_json::Value> {
         let q = urlencoding::encode(query);
-        let url = format!(
-            "https://api.github.com/search/code?q={q}&per_page={limit}&page={page}"
-        );
+        let url = format!("https://api.github.com/search/code?q={q}&per_page={limit}&page={page}");
         let resp = self
             .http
             .get(&url)

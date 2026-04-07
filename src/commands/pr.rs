@@ -99,7 +99,11 @@ pub async fn handle(client: &Client, command: PrCommands) -> Result<()> {
             let result = get_pr(client, &repo, number).await?;
             print_issue_detail(&result);
         }
-        PrCommands::Comment { repo, number, message } => {
+        PrCommands::Comment {
+            repo,
+            number,
+            message,
+        } => {
             let result = comment_on_issue(client, &repo, number, &message).await?;
             let id = result["id"].as_u64().unwrap_or(0);
             println!("Posted comment (id: {id}) on {repo}#{number}");
@@ -112,23 +116,43 @@ pub async fn handle(client: &Client, command: PrCommands) -> Result<()> {
             approve_pr(client, &repo, number).await?;
             println!("Approved {repo}#{number}");
         }
-        PrCommands::Discussions { repo, number, unresolved: _ } => {
+        PrCommands::Discussions {
+            repo,
+            number,
+            unresolved: _,
+        } => {
             let result = list_review_comments(client, &repo, number).await?;
             print_discussions(&result);
         }
-        PrCommands::Reply { repo, number, comment, message } => {
+        PrCommands::Reply {
+            repo,
+            number,
+            comment,
+            message,
+        } => {
             let result = reply_to_review_comment(client, &repo, number, comment, &message).await?;
             let id = result["id"].as_u64().unwrap_or(0);
             println!("Posted reply (id: {id}) to comment {comment}");
         }
-        PrCommands::Review { repo, number, body, event, comments } => {
+        PrCommands::Review {
+            repo,
+            number,
+            body,
+            event,
+            comments,
+        } => {
             handle_review(client, &repo, number, body, event, comments).await?;
         }
     }
     Ok(())
 }
 
-async fn list_prs(client: &Client, repo: &str, state: &str, limit: u32) -> Result<serde_json::Value> {
+async fn list_prs(
+    client: &Client,
+    repo: &str,
+    state: &str,
+    limit: u32,
+) -> Result<serde_json::Value> {
     let path = format!("/repos/{repo}/pulls?per_page={limit}&state={state}");
     client.get(&path).await
 }
@@ -138,22 +162,39 @@ async fn get_pr(client: &Client, repo: &str, number: u64) -> Result<serde_json::
     client.get(&path).await
 }
 
-async fn comment_on_issue(client: &Client, repo: &str, number: u64, body: &str) -> Result<serde_json::Value> {
+async fn comment_on_issue(
+    client: &Client,
+    repo: &str,
+    number: u64,
+    body: &str,
+) -> Result<serde_json::Value> {
     let path = format!("/repos/{repo}/issues/{number}/comments");
-    client.post(&path, &serde_json::json!({ "body": body })).await
+    client
+        .post(&path, &serde_json::json!({ "body": body }))
+        .await
 }
 
-async fn list_issue_comments(client: &Client, repo: &str, number: u64) -> Result<serde_json::Value> {
+async fn list_issue_comments(
+    client: &Client,
+    repo: &str,
+    number: u64,
+) -> Result<serde_json::Value> {
     let path = format!("/repos/{repo}/issues/{number}/comments?per_page=100");
     client.get(&path).await
 }
 
 async fn approve_pr(client: &Client, repo: &str, number: u64) -> Result<serde_json::Value> {
     let path = format!("/repos/{repo}/pulls/{number}/reviews");
-    client.post(&path, &serde_json::json!({ "event": "APPROVE" })).await
+    client
+        .post(&path, &serde_json::json!({ "event": "APPROVE" }))
+        .await
 }
 
-async fn list_review_comments(client: &Client, repo: &str, number: u64) -> Result<serde_json::Value> {
+async fn list_review_comments(
+    client: &Client,
+    repo: &str,
+    number: u64,
+) -> Result<serde_json::Value> {
     let path = format!("/repos/{repo}/pulls/{number}/comments?per_page=100");
     client.get(&path).await
 }
@@ -166,7 +207,9 @@ async fn reply_to_review_comment(
     body: &str,
 ) -> Result<serde_json::Value> {
     let path = format!("/repos/{repo}/pulls/comments/{comment_id}/replies");
-    client.post(&path, &serde_json::json!({ "body": body })).await
+    client
+        .post(&path, &serde_json::json!({ "body": body }))
+        .await
 }
 
 async fn handle_review(
@@ -183,13 +226,25 @@ async fn handle_review(
             let mut parts = c.splitn(3, ':');
             let path = parts.next().unwrap_or("");
             let line: u64 = parts.next().unwrap_or("0").parse().unwrap_or(0);
-            let comment_body = parts.next().unwrap_or("").replace("\\n", "\n").replace("\\t", "\t");
+            let comment_body = parts
+                .next()
+                .unwrap_or("")
+                .replace("\\n", "\n")
+                .replace("\\t", "\t");
             serde_json::json!({ "path": path, "line": line, "side": "RIGHT", "body": comment_body })
         })
         .collect();
     let event_upper = event.to_uppercase();
     let body_interpreted = body.map(|b| b.replace("\\n", "\n").replace("\\t", "\t"));
-    let result = create_review(client, repo, number, &event_upper, body_interpreted.as_deref(), inline_comments).await?;
+    let result = create_review(
+        client,
+        repo,
+        number,
+        &event_upper,
+        body_interpreted.as_deref(),
+        inline_comments,
+    )
+    .await?;
     let review_id = result["id"].as_u64().unwrap_or(0);
     println!("Submitted review (id: {review_id}) on {repo}#{number} [{event_upper}]");
     Ok(())

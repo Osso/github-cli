@@ -56,7 +56,13 @@ pub async fn handle(client: &Client, command: WebhookCommands) -> Result<()> {
             let result = client.get(&format!("/repos/{repo}/hooks")).await?;
             print_hooks(&result);
         }
-        WebhookCommands::Create { repo, url, secret, events, content_type } => {
+        WebhookCommands::Create {
+            repo,
+            url,
+            secret,
+            events,
+            content_type,
+        } => {
             let events: Vec<&str> = events.split(',').map(str::trim).collect();
             let mut config = serde_json::json!({
                 "url": url,
@@ -76,15 +82,21 @@ pub async fn handle(client: &Client, command: WebhookCommands) -> Result<()> {
             println!("Created webhook {id} on {repo} -> {url}");
         }
         WebhookCommands::Delete { repo, hook_id } => {
-            client.delete(&format!("/repos/{repo}/hooks/{hook_id}")).await?;
+            client
+                .delete(&format!("/repos/{repo}/hooks/{hook_id}"))
+                .await?;
             println!("Deleted webhook {hook_id} from {repo}");
         }
         WebhookCommands::Ping { repo, hook_id } => {
-            client.post_empty(&format!("/repos/{repo}/hooks/{hook_id}/pings")).await?;
+            client
+                .post_empty(&format!("/repos/{repo}/hooks/{hook_id}/pings"))
+                .await?;
             println!("Pinged webhook {hook_id} on {repo}");
         }
         WebhookCommands::Deliveries { repo, hook_id } => {
-            let result = client.get(&format!("/repos/{repo}/hooks/{hook_id}/deliveries")).await?;
+            let result = client
+                .get(&format!("/repos/{repo}/hooks/{hook_id}/deliveries"))
+                .await?;
             print_deliveries(&result);
         }
     }
@@ -92,7 +104,9 @@ pub async fn handle(client: &Client, command: WebhookCommands) -> Result<()> {
 }
 
 fn print_hooks(value: &serde_json::Value) {
-    let Some(hooks) = value.as_array() else { return };
+    let Some(hooks) = value.as_array() else {
+        return;
+    };
     if hooks.is_empty() {
         println!("No webhooks found");
         return;
@@ -115,7 +129,9 @@ fn print_hooks(value: &serde_json::Value) {
 }
 
 fn print_deliveries(value: &serde_json::Value) {
-    let Some(deliveries) = value.as_array() else { return };
+    let Some(deliveries) = value.as_array() else {
+        return;
+    };
     if deliveries.is_empty() {
         println!("No deliveries found");
         return;
@@ -123,7 +139,12 @@ fn print_deliveries(value: &serde_json::Value) {
     for delivery in deliveries {
         let id = delivery["id"].as_u64().unwrap_or(0);
         let event = delivery["event"].as_str().unwrap_or("");
-        let delivered_at = delivery["delivered_at"].as_str().unwrap_or("").split('T').next().unwrap_or("");
+        let delivered_at = delivery["delivered_at"]
+            .as_str()
+            .unwrap_or("")
+            .split('T')
+            .next()
+            .unwrap_or("");
         let status = delivery["status"].as_str().unwrap_or("");
         let status_code = delivery["status_code"].as_u64().unwrap_or(0);
         println!("{id:<12} {event:<20} {status:<10} {status_code:<5} {delivered_at}");

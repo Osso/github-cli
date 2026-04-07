@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 
 mod client;
@@ -103,9 +103,9 @@ enum Commands {
 }
 
 fn get_client(config: &Config) -> Result<Client> {
-    let token = config
-        .get_token()
-        .ok_or_else(|| anyhow!("No token. Set GITHUB_TOKEN or run: github config --token <token>"))?;
+    let token = config.get_token().ok_or_else(|| {
+        anyhow!("No token. Set GITHUB_TOKEN or run: github config --token <token>")
+    })?;
     Client::new(&token)
 }
 
@@ -142,10 +142,16 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Config { token } => handle_config(config, token)?,
-        Commands::React { repo, number, reaction } => {
+        Commands::React {
+            repo,
+            number,
+            reaction,
+        } => {
             let client = get_client(&config)?;
             let path = format!("/repos/{repo}/issues/{number}/reactions");
-            let result = client.post(&path, &serde_json::json!({ "content": reaction })).await?;
+            let result = client
+                .post(&path, &serde_json::json!({ "content": reaction }))
+                .await?;
             let content = result["content"].as_str().unwrap_or(&reaction);
             println!("Added {content} reaction to {repo}#{number}");
         }

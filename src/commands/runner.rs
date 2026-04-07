@@ -39,25 +39,45 @@ pub async fn handle(client: &Client, command: RunnerCommands) -> Result<()> {
     match command {
         RunnerCommands::List { target, org } => {
             let result = if org {
-                client.get(&format!("/orgs/{target}/actions/runners")).await?
+                client
+                    .get(&format!("/orgs/{target}/actions/runners"))
+                    .await?
             } else {
-                client.get(&format!("/repos/{target}/actions/runners")).await?
+                client
+                    .get(&format!("/repos/{target}/actions/runners"))
+                    .await?
             };
             print_runners(&result);
         }
-        RunnerCommands::View { target, runner_id, org } => {
+        RunnerCommands::View {
+            target,
+            runner_id,
+            org,
+        } => {
             let result = if org {
-                client.get(&format!("/orgs/{target}/actions/runners/{runner_id}")).await?
+                client
+                    .get(&format!("/orgs/{target}/actions/runners/{runner_id}"))
+                    .await?
             } else {
-                client.get(&format!("/repos/{target}/actions/runners/{runner_id}")).await?
+                client
+                    .get(&format!("/repos/{target}/actions/runners/{runner_id}"))
+                    .await?
             };
             print_runner_detail(&result);
         }
-        RunnerCommands::Delete { target, runner_id, org } => {
+        RunnerCommands::Delete {
+            target,
+            runner_id,
+            org,
+        } => {
             if org {
-                client.delete(&format!("/orgs/{target}/actions/runners/{runner_id}")).await?;
+                client
+                    .delete(&format!("/orgs/{target}/actions/runners/{runner_id}"))
+                    .await?;
             } else {
-                client.delete(&format!("/repos/{target}/actions/runners/{runner_id}")).await?;
+                client
+                    .delete(&format!("/repos/{target}/actions/runners/{runner_id}"))
+                    .await?;
             }
             println!("Deleted runner {runner_id}");
         }
@@ -75,7 +95,10 @@ fn print_runners(value: &serde_json::Value) {
             return;
         }
         println!("Total: {total}");
-        println!("{:<8} {:<40} {:<10} {:<6} Labels", "ID", "Name", "Status", "Busy");
+        println!(
+            "{:<8} {:<40} {:<10} {:<6} Labels",
+            "ID", "Name", "Status", "Busy"
+        );
         println!("{}", "-".repeat(80));
         for runner in runners {
             let id = runner["id"].as_u64().unwrap_or(0);
@@ -110,6 +133,10 @@ fn print_runner_detail(value: &serde_json::Value) {
     println!("Busy: {}", if busy { "yes" } else { "no" });
     println!(
         "Labels: {}",
-        if labels.is_empty() { "(none)".to_string() } else { labels.join(", ") }
+        if labels.is_empty() {
+            "(none)".to_string()
+        } else {
+            labels.join(", ")
+        }
     );
 }
