@@ -31,6 +31,13 @@ pub enum RepoCommands {
         #[command(subcommand)]
         command: HookCommands,
     },
+    /// Transfer a repository to a new owner
+    Transfer {
+        /// Repository (owner/repo)
+        repo: String,
+        /// New owner (user or organization)
+        new_owner: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -80,6 +87,9 @@ pub enum ProtectCommands {
         /// Branch name
         #[arg(short, long)]
         branch: String,
+        /// Required status check contexts (can be repeated)
+        #[arg(short, long)]
+        check: Vec<String>,
     },
     /// Show branch protection status
     Get {
@@ -98,6 +108,7 @@ pub async fn handle(client: &Client, command: RepoCommands) -> Result<()> {
         RepoCommands::Protect { command } => handle_protect(client, command).await,
         RepoCommands::Keys { command } => handle_keys(client, command).await,
         RepoCommands::Hooks { command } => handle_hooks(client, command).await,
+        RepoCommands::Transfer { repo, new_owner } => transfer_repo(client, &repo, &new_owner).await,
     }
 }
 
@@ -115,14 +126,19 @@ async fn list_branches(client: &Client, repo: &str) -> Result<()> {
 
 async fn handle_protect(client: &Client, command: ProtectCommands) -> Result<()> {
     match command {
-        ProtectCommands::Set { repo, branch } => set_protection(client, &repo, &branch).await,
+        ProtectCommands::Set { repo, branch, check } => set_protection(client, &repo, &branch, &check).await,
         ProtectCommands::Get { repo, branch } => get_protection(client, &repo, &branch).await,
     }
 }
 
-async fn set_protection(client: &Client, repo: &str, branch: &str) -> Result<()> {
+async fn set_protection(client: &Client, repo: &str, branch: &str, checks: &[String]) -> Result<()> {
+    let status_checks = if checks.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::json!({ "strict": true, "contexts": checks })
+    };
     let body = serde_json::json!({
-        "required_status_checks": null,
+        "required_status_checks": status_checks,
         "enforce_admins": true,
         "required_pull_request_reviews": null,
         "restrictions": null,
@@ -133,6 +149,9 @@ async fn set_protection(client: &Client, repo: &str, branch: &str) -> Result<()>
     });
     client.put(&format!("/repos/{repo}/branches/{branch}/protection"), &body).await?;
     println!("Protected {repo}:{branch} (enforce admins, no force push, no deletion)");
+    if !checks.is_empty() {
+        println!("Required checks: {}", checks.join(", "));
+    }
     Ok(())
 }
 
@@ -185,6 +204,14 @@ async fn handle_hooks(client: &Client, command: HookCommands) -> Result<()> {
             print_hooks(&result);
         }
     }
+    Ok(())
+}
+
+async fn transfer_repo(client: &Client, repo: &str, new_owner: &str) -> Result<()> {
+    let body = serde_json::json!({ "new_owner": new_owner });
+    let result = client.post(&format!("/repos/{repo}/transfer"), &body).await?;
+    let full_name = result["full_name"].as_str().unwrap_or(repo);
+    println!("Transferred to {full_name}");
     Ok(())
 }
 

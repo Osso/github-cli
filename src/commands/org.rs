@@ -5,6 +5,14 @@ use crate::client::Client;
 
 #[derive(Subcommand)]
 pub enum OrgCommands {
+    /// Create a new GitHub organization
+    Create {
+        /// Organization login name
+        name: String,
+        /// Billing email address (required)
+        #[arg(long)]
+        billing_email: String,
+    },
     /// Invite a user to the organization by email
     Invite {
         /// Organization name
@@ -38,30 +46,51 @@ pub enum OrgCommands {
 
 pub async fn handle(client: &Client, command: OrgCommands) -> Result<()> {
     match command {
-        OrgCommands::Invite { org, email, role, teams } => {
-            let team_ids = teams.map(|t| {
-                t.split(',')
-                    .filter_map(|s| s.trim().parse::<u64>().ok())
-                    .collect::<Vec<_>>()
-            });
-            let path = format!("/orgs/{org}/invitations");
-            let mut body = serde_json::json!({ "email": email, "role": role });
-            if let Some(ids) = team_ids {
-                body["team_ids"] = serde_json::json!(ids);
-            }
-            let result = client.post(&path, &body).await?;
-            let id = result["id"].as_u64().unwrap_or(0);
-            println!("Invitation sent to {email} (id: {id})");
-        }
-        OrgCommands::Invitations { org, limit } => {
-            let result = client.get(&format!("/orgs/{org}/invitations?per_page={limit}")).await?;
-            print_org_invitations(&result);
-        }
-        OrgCommands::Members { org, limit } => {
-            let result = client.get(&format!("/orgs/{org}/members?per_page={limit}")).await?;
-            print_org_members(&result);
-        }
+        OrgCommands::Create { name, billing_email } => create_org(client, &name, &billing_email).await,
+        OrgCommands::Invite { org, email, role, teams } => invite_member(client, &org, &email, &role, teams).await,
+        OrgCommands::Invitations { org, limit } => list_invitations(client, &org, limit).await,
+        OrgCommands::Members { org, limit } => list_members(client, &org, limit).await,
     }
+}
+
+async fn create_org(client: &Client, name: &str, billing_email: &str) -> Result<()> {
+    let body = serde_json::json!({
+        "login": name,
+        "name": name,
+        "billing_email": billing_email,
+    });
+    let result = client.post("/user/orgs", &body).await?;
+    let login = result["login"].as_str().unwrap_or(name);
+    let id = result["id"].as_u64().unwrap_or(0);
+    println!("Organization created: {login} (id: {id})");
+    Ok(())
+}
+
+async fn invite_member(client: &Client, org: &str, email: &str, role: &str, teams: Option<String>) -> Result<()> {
+    let team_ids = teams.map(|t| {
+        t.split(',')
+            .filter_map(|s| s.trim().parse::<u64>().ok())
+            .collect::<Vec<_>>()
+    });
+    let mut body = serde_json::json!({ "email": email, "role": role });
+    if let Some(ids) = team_ids {
+        body["team_ids"] = serde_json::json!(ids);
+    }
+    let result = client.post(&format!("/orgs/{org}/invitations"), &body).await?;
+    let id = result["id"].as_u64().unwrap_or(0);
+    println!("Invitation sent to {email} (id: {id})");
+    Ok(())
+}
+
+async fn list_invitations(client: &Client, org: &str, limit: u32) -> Result<()> {
+    let result = client.get(&format!("/orgs/{org}/invitations?per_page={limit}")).await?;
+    print_org_invitations(&result);
+    Ok(())
+}
+
+async fn list_members(client: &Client, org: &str, limit: u32) -> Result<()> {
+    let result = client.get(&format!("/orgs/{org}/members?per_page={limit}")).await?;
+    print_org_members(&result);
     Ok(())
 }
 
