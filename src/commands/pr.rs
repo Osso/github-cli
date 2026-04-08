@@ -91,59 +91,67 @@ pub enum PrCommands {
 
 pub async fn handle(client: &Client, command: PrCommands) -> Result<()> {
     match command {
-        PrCommands::List { repo, state, limit } => {
-            let result = list_prs(client, &repo, &state, limit).await?;
-            print_prs(&result);
+        PrCommands::List { repo, state, limit } => handle_list(client, &repo, &state, limit).await?,
+        PrCommands::View { repo, number } => handle_view(client, &repo, number).await?,
+        PrCommands::Comment { repo, number, message } => {
+            handle_comment(client, &repo, number, &message).await?
         }
-        PrCommands::View { repo, number } => {
-            let result = get_pr(client, &repo, number).await?;
-            print_issue_detail(&result);
+        PrCommands::Comments { repo, number } => handle_comments(client, &repo, number).await?,
+        PrCommands::Approve { repo, number } => handle_approve(client, &repo, number).await?,
+        PrCommands::Discussions { repo, number, unresolved: _ } => {
+            handle_discussions(client, &repo, number).await?
         }
-        PrCommands::Comment {
-            repo,
-            number,
-            message,
-        } => {
-            let result = comment_on_issue(client, &repo, number, &message).await?;
-            let id = result["id"].as_u64().unwrap_or(0);
-            println!("Posted comment (id: {id}) on {repo}#{number}");
+        PrCommands::Reply { repo, number, comment, message } => {
+            handle_reply(client, &repo, number, comment, &message).await?
         }
-        PrCommands::Comments { repo, number } => {
-            let result = list_issue_comments(client, &repo, number).await?;
-            print_issue_comments(&result);
-        }
-        PrCommands::Approve { repo, number } => {
-            approve_pr(client, &repo, number).await?;
-            println!("Approved {repo}#{number}");
-        }
-        PrCommands::Discussions {
-            repo,
-            number,
-            unresolved: _,
-        } => {
-            let result = list_review_comments(client, &repo, number).await?;
-            print_discussions(&result);
-        }
-        PrCommands::Reply {
-            repo,
-            number,
-            comment,
-            message,
-        } => {
-            let result = reply_to_review_comment(client, &repo, number, comment, &message).await?;
-            let id = result["id"].as_u64().unwrap_or(0);
-            println!("Posted reply (id: {id}) to comment {comment}");
-        }
-        PrCommands::Review {
-            repo,
-            number,
-            body,
-            event,
-            comments,
-        } => {
-            handle_review(client, &repo, number, body, event, comments).await?;
+        PrCommands::Review { repo, number, body, event, comments } => {
+            handle_review(client, &repo, number, body, event, comments).await?
         }
     }
+    Ok(())
+}
+
+async fn handle_list(client: &Client, repo: &str, state: &str, limit: u32) -> Result<()> {
+    let result = list_prs(client, repo, state, limit).await?;
+    print_prs(&result);
+    Ok(())
+}
+
+async fn handle_view(client: &Client, repo: &str, number: u64) -> Result<()> {
+    let result = get_pr(client, repo, number).await?;
+    print_issue_detail(&result);
+    Ok(())
+}
+
+async fn handle_comment(client: &Client, repo: &str, number: u64, message: &str) -> Result<()> {
+    let result = comment_on_issue(client, repo, number, message).await?;
+    let id = result["id"].as_u64().unwrap_or(0);
+    println!("Posted comment (id: {id}) on {repo}#{number}");
+    Ok(())
+}
+
+async fn handle_comments(client: &Client, repo: &str, number: u64) -> Result<()> {
+    let result = list_issue_comments(client, repo, number).await?;
+    print_issue_comments(&result);
+    Ok(())
+}
+
+async fn handle_approve(client: &Client, repo: &str, number: u64) -> Result<()> {
+    approve_pr(client, repo, number).await?;
+    println!("Approved {repo}#{number}");
+    Ok(())
+}
+
+async fn handle_discussions(client: &Client, repo: &str, number: u64) -> Result<()> {
+    let result = list_review_comments(client, repo, number).await?;
+    print_discussions(&result);
+    Ok(())
+}
+
+async fn handle_reply(client: &Client, repo: &str, number: u64, comment: u64, message: &str) -> Result<()> {
+    let result = reply_to_review_comment(client, repo, number, comment, message).await?;
+    let id = result["id"].as_u64().unwrap_or(0);
+    println!("Posted reply (id: {id}) to comment {comment}");
     Ok(())
 }
 

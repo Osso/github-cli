@@ -25,48 +25,49 @@ impl Client {
         Ok(Self { http })
     }
 
-    pub async fn get(&self, path: &str) -> Result<serde_json::Value> {
+    async fn send(&self, method: reqwest::Method, path: &str) -> Result<reqwest::Response> {
         let url = format!("https://api.github.com{path}");
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.http.request(method.clone(), &url).send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await?;
-            bail!("GET {path} failed ({status}): {body}");
+            bail!("{} {path} failed ({status}): {body}", method);
         }
-        Ok(resp.json().await?)
+        Ok(resp)
+    }
+
+    async fn send_json(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<reqwest::Response> {
+        let url = format!("https://api.github.com{path}");
+        let resp = self.http.request(method.clone(), &url).json(body).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await?;
+            bail!("{} {path} failed ({status}): {body}", method);
+        }
+        Ok(resp)
+    }
+
+    pub async fn get(&self, path: &str) -> Result<serde_json::Value> {
+        Ok(self.send(reqwest::Method::GET, path).await?.json().await?)
     }
 
     pub async fn post(&self, path: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
-        let url = format!("https://api.github.com{path}");
-        let resp = self.http.post(&url).json(body).send().await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await?;
-            bail!("POST {path} failed ({status}): {body}");
-        }
-        Ok(resp.json().await?)
+        Ok(self.send_json(reqwest::Method::POST, path, body).await?.json().await?)
     }
 
     /// POST that expects no response body (e.g. 202 Cancel, 201 Rerun).
     pub async fn post_empty(&self, path: &str) -> Result<()> {
-        let url = format!("https://api.github.com{path}");
-        let resp = self.http.post(&url).send().await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await?;
-            bail!("POST {path} failed ({status}): {body}");
-        }
+        self.send(reqwest::Method::POST, path).await?;
         Ok(())
     }
 
     pub async fn put(&self, path: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
-        let url = format!("https://api.github.com{path}");
-        let resp = self.http.put(&url).json(body).send().await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await?;
-            bail!("PUT {path} failed ({status}): {body}");
-        }
+        let resp = self.send_json(reqwest::Method::PUT, path, body).await?;
         let text = resp.text().await?;
         if text.is_empty() {
             Ok(serde_json::json!({}))
@@ -76,26 +77,13 @@ impl Client {
     }
 
     pub async fn delete(&self, path: &str) -> Result<()> {
-        let url = format!("https://api.github.com{path}");
-        let resp = self.http.delete(&url).send().await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await?;
-            bail!("DELETE {path} failed ({status}): {body}");
-        }
+        self.send(reqwest::Method::DELETE, path).await?;
         Ok(())
     }
 
     /// GET that follows redirects and returns the raw bytes (for log downloads).
     pub async fn get_bytes(&self, path: &str) -> Result<bytes::Bytes> {
-        let url = format!("https://api.github.com{path}");
-        let resp = self.http.get(&url).send().await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await?;
-            bail!("GET {path} failed ({status}): {body}");
-        }
-        Ok(resp.bytes().await?)
+        Ok(self.send(reqwest::Method::GET, path).await?.bytes().await?)
     }
 
     pub async fn search_code(

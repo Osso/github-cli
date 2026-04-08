@@ -61,51 +61,56 @@ pub enum RunCommands {
 
 pub async fn handle(client: &Client, command: RunCommands) -> Result<()> {
     match command {
-        RunCommands::List {
-            repo,
-            limit,
-            status,
-            branch,
-            workflow,
-        } => {
-            let result =
-                list_runs(client, &repo, limit, status.as_deref(), branch.as_deref()).await?;
-            let workflow_filter = workflow.as_deref();
-            print_runs(&result, workflow_filter, limit);
+        RunCommands::List { repo, limit, status, branch, workflow } => {
+            handle_list(client, &repo, limit, status.as_deref(), branch.as_deref(), workflow.as_deref()).await?
         }
-        RunCommands::View { repo, run_id } => {
-            let run = client
-                .get(&format!("/repos/{repo}/actions/runs/{run_id}"))
-                .await?;
-            let jobs = client
-                .get(&format!("/repos/{repo}/actions/runs/{run_id}/jobs"))
-                .await?;
-            print_run_detail(&run, &jobs);
-        }
+        RunCommands::View { repo, run_id } => handle_view(client, &repo, run_id).await?,
         RunCommands::Logs { repo, run_id, job } => {
-            show_logs(client, &repo, run_id, job.as_deref()).await?;
+            show_logs(client, &repo, run_id, job.as_deref()).await?
         }
-        RunCommands::Cancel { repo, run_id } => {
-            client
-                .post_empty(&format!("/repos/{repo}/actions/runs/{run_id}/cancel"))
-                .await?;
-            println!("Cancelled run {run_id}");
-        }
-        RunCommands::Rerun {
-            repo,
-            run_id,
-            failed,
-        } => {
-            let path = if failed {
-                format!("/repos/{repo}/actions/runs/{run_id}/rerun-failed-jobs")
-            } else {
-                format!("/repos/{repo}/actions/runs/{run_id}/rerun")
-            };
-            client.post_empty(&path).await?;
-            let scope = if failed { "failed jobs in" } else { "" };
-            println!("Re-running {scope} run {run_id}");
-        }
+        RunCommands::Cancel { repo, run_id } => handle_cancel(client, &repo, run_id).await?,
+        RunCommands::Rerun { repo, run_id, failed } => handle_rerun(client, &repo, run_id, failed).await?,
     }
+    Ok(())
+}
+
+async fn handle_list(
+    client: &Client,
+    repo: &str,
+    limit: u32,
+    status: Option<&str>,
+    branch: Option<&str>,
+    workflow: Option<&str>,
+) -> Result<()> {
+    let result = list_runs(client, repo, limit, status, branch).await?;
+    print_runs(&result, workflow, limit);
+    Ok(())
+}
+
+async fn handle_view(client: &Client, repo: &str, run_id: u64) -> Result<()> {
+    let run = client.get(&format!("/repos/{repo}/actions/runs/{run_id}")).await?;
+    let jobs = client.get(&format!("/repos/{repo}/actions/runs/{run_id}/jobs")).await?;
+    print_run_detail(&run, &jobs);
+    Ok(())
+}
+
+async fn handle_cancel(client: &Client, repo: &str, run_id: u64) -> Result<()> {
+    client
+        .post_empty(&format!("/repos/{repo}/actions/runs/{run_id}/cancel"))
+        .await?;
+    println!("Cancelled run {run_id}");
+    Ok(())
+}
+
+async fn handle_rerun(client: &Client, repo: &str, run_id: u64, failed: bool) -> Result<()> {
+    let path = if failed {
+        format!("/repos/{repo}/actions/runs/{run_id}/rerun-failed-jobs")
+    } else {
+        format!("/repos/{repo}/actions/runs/{run_id}/rerun")
+    };
+    client.post_empty(&path).await?;
+    let scope = if failed { "failed jobs in" } else { "" };
+    println!("Re-running {scope} run {run_id}");
     Ok(())
 }
 

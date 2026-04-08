@@ -52,54 +52,65 @@ pub enum WebhookCommands {
 
 pub async fn handle(client: &Client, command: WebhookCommands) -> Result<()> {
     match command {
-        WebhookCommands::List { repo } => {
-            let result = client.get(&format!("/repos/{repo}/hooks")).await?;
-            print_hooks(&result);
+        WebhookCommands::List { repo } => handle_list(client, &repo).await?,
+        WebhookCommands::Create { repo, url, secret, events, content_type } => {
+            handle_create(client, &repo, &url, secret.as_deref(), &events, &content_type).await?
         }
-        WebhookCommands::Create {
-            repo,
-            url,
-            secret,
-            events,
-            content_type,
-        } => {
-            let events: Vec<&str> = events.split(',').map(str::trim).collect();
-            let mut config = serde_json::json!({
-                "url": url,
-                "content_type": content_type,
-            });
-            if let Some(s) = &secret {
-                config["secret"] = serde_json::Value::String(s.clone());
-            }
-            let body = serde_json::json!({
-                "name": "web",
-                "active": true,
-                "events": events,
-                "config": config,
-            });
-            let result = client.post(&format!("/repos/{repo}/hooks"), &body).await?;
-            let id = result["id"].as_u64().unwrap_or(0);
-            println!("Created webhook {id} on {repo} -> {url}");
-        }
-        WebhookCommands::Delete { repo, hook_id } => {
-            client
-                .delete(&format!("/repos/{repo}/hooks/{hook_id}"))
-                .await?;
-            println!("Deleted webhook {hook_id} from {repo}");
-        }
-        WebhookCommands::Ping { repo, hook_id } => {
-            client
-                .post_empty(&format!("/repos/{repo}/hooks/{hook_id}/pings"))
-                .await?;
-            println!("Pinged webhook {hook_id} on {repo}");
-        }
+        WebhookCommands::Delete { repo, hook_id } => handle_delete(client, &repo, hook_id).await?,
+        WebhookCommands::Ping { repo, hook_id } => handle_ping(client, &repo, hook_id).await?,
         WebhookCommands::Deliveries { repo, hook_id } => {
-            let result = client
-                .get(&format!("/repos/{repo}/hooks/{hook_id}/deliveries"))
-                .await?;
-            print_deliveries(&result);
+            handle_deliveries(client, &repo, hook_id).await?
         }
     }
+    Ok(())
+}
+
+async fn handle_list(client: &Client, repo: &str) -> Result<()> {
+    let result = client.get(&format!("/repos/{repo}/hooks")).await?;
+    print_hooks(&result);
+    Ok(())
+}
+
+async fn handle_create(
+    client: &Client,
+    repo: &str,
+    url: &str,
+    secret: Option<&str>,
+    events: &str,
+    content_type: &str,
+) -> Result<()> {
+    let events: Vec<&str> = events.split(',').map(str::trim).collect();
+    let mut config = serde_json::json!({ "url": url, "content_type": content_type });
+    if let Some(s) = secret {
+        config["secret"] = serde_json::Value::String(s.to_owned());
+    }
+    let body = serde_json::json!({
+        "name": "web",
+        "active": true,
+        "events": events,
+        "config": config,
+    });
+    let result = client.post(&format!("/repos/{repo}/hooks"), &body).await?;
+    let id = result["id"].as_u64().unwrap_or(0);
+    println!("Created webhook {id} on {repo} -> {url}");
+    Ok(())
+}
+
+async fn handle_delete(client: &Client, repo: &str, hook_id: u64) -> Result<()> {
+    client.delete(&format!("/repos/{repo}/hooks/{hook_id}")).await?;
+    println!("Deleted webhook {hook_id} from {repo}");
+    Ok(())
+}
+
+async fn handle_ping(client: &Client, repo: &str, hook_id: u64) -> Result<()> {
+    client.post_empty(&format!("/repos/{repo}/hooks/{hook_id}/pings")).await?;
+    println!("Pinged webhook {hook_id} on {repo}");
+    Ok(())
+}
+
+async fn handle_deliveries(client: &Client, repo: &str, hook_id: u64) -> Result<()> {
+    let result = client.get(&format!("/repos/{repo}/hooks/{hook_id}/deliveries")).await?;
+    print_deliveries(&result);
     Ok(())
 }
 

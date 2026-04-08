@@ -37,51 +37,44 @@ pub enum RunnerCommands {
 
 pub async fn handle(client: &Client, command: RunnerCommands) -> Result<()> {
     match command {
-        RunnerCommands::List { target, org } => {
-            let result = if org {
-                client
-                    .get(&format!("/orgs/{target}/actions/runners"))
-                    .await?
-            } else {
-                client
-                    .get(&format!("/repos/{target}/actions/runners"))
-                    .await?
-            };
-            print_runners(&result);
+        RunnerCommands::List { target, org } => handle_list(client, &target, org).await?,
+        RunnerCommands::View { target, runner_id, org } => {
+            handle_view(client, &target, runner_id, org).await?
         }
-        RunnerCommands::View {
-            target,
-            runner_id,
-            org,
-        } => {
-            let result = if org {
-                client
-                    .get(&format!("/orgs/{target}/actions/runners/{runner_id}"))
-                    .await?
-            } else {
-                client
-                    .get(&format!("/repos/{target}/actions/runners/{runner_id}"))
-                    .await?
-            };
-            print_runner_detail(&result);
-        }
-        RunnerCommands::Delete {
-            target,
-            runner_id,
-            org,
-        } => {
-            if org {
-                client
-                    .delete(&format!("/orgs/{target}/actions/runners/{runner_id}"))
-                    .await?;
-            } else {
-                client
-                    .delete(&format!("/repos/{target}/actions/runners/{runner_id}"))
-                    .await?;
-            }
-            println!("Deleted runner {runner_id}");
+        RunnerCommands::Delete { target, runner_id, org } => {
+            handle_delete(client, &target, runner_id, org).await?
         }
     }
+    Ok(())
+}
+
+async fn handle_list(client: &Client, target: &str, org: bool) -> Result<()> {
+    let result = if org {
+        client.get(&format!("/orgs/{target}/actions/runners")).await?
+    } else {
+        client.get(&format!("/repos/{target}/actions/runners")).await?
+    };
+    print_runners(&result);
+    Ok(())
+}
+
+async fn handle_view(client: &Client, target: &str, runner_id: u64, org: bool) -> Result<()> {
+    let result = if org {
+        client.get(&format!("/orgs/{target}/actions/runners/{runner_id}")).await?
+    } else {
+        client.get(&format!("/repos/{target}/actions/runners/{runner_id}")).await?
+    };
+    print_runner_detail(&result);
+    Ok(())
+}
+
+async fn handle_delete(client: &Client, target: &str, runner_id: u64, org: bool) -> Result<()> {
+    if org {
+        client.delete(&format!("/orgs/{target}/actions/runners/{runner_id}")).await?;
+    } else {
+        client.delete(&format!("/repos/{target}/actions/runners/{runner_id}")).await?;
+    }
+    println!("Deleted runner {runner_id}");
     Ok(())
 }
 

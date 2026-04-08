@@ -135,6 +135,16 @@ fn handle_config(config: Config, token: Option<String>) -> Result<()> {
     Ok(())
 }
 
+async fn handle_react(client: &Client, repo: &str, number: u64, reaction: &str) -> Result<()> {
+    let path = format!("/repos/{repo}/issues/{number}/reactions");
+    let result = client
+        .post(&path, &serde_json::json!({ "content": reaction }))
+        .await?;
+    let content = result["content"].as_str().unwrap_or(reaction);
+    println!("Added {content} reaction to {repo}#{number}");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -142,18 +152,8 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Config { token } => handle_config(config, token)?,
-        Commands::React {
-            repo,
-            number,
-            reaction,
-        } => {
-            let client = get_client(&config)?;
-            let path = format!("/repos/{repo}/issues/{number}/reactions");
-            let result = client
-                .post(&path, &serde_json::json!({ "content": reaction }))
-                .await?;
-            let content = result["content"].as_str().unwrap_or(&reaction);
-            println!("Added {content} reaction to {repo}#{number}");
+        Commands::React { repo, number, reaction } => {
+            handle_react(&get_client(&config)?, &repo, number, &reaction).await?
         }
         Commands::Issue { command } => {
             commands::issue::handle(&get_client(&config)?, command).await?;
