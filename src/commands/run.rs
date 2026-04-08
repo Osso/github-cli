@@ -61,15 +61,33 @@ pub enum RunCommands {
 
 pub async fn handle(client: &Client, command: RunCommands) -> Result<()> {
     match command {
-        RunCommands::List { repo, limit, status, branch, workflow } => {
-            handle_list(client, &repo, limit, status.as_deref(), branch.as_deref(), workflow.as_deref()).await?
+        RunCommands::List {
+            repo,
+            limit,
+            status,
+            branch,
+            workflow,
+        } => {
+            handle_list(
+                client,
+                &repo,
+                limit,
+                status.as_deref(),
+                branch.as_deref(),
+                workflow.as_deref(),
+            )
+            .await?
         }
         RunCommands::View { repo, run_id } => handle_view(client, &repo, run_id).await?,
         RunCommands::Logs { repo, run_id, job } => {
             show_logs(client, &repo, run_id, job.as_deref()).await?
         }
         RunCommands::Cancel { repo, run_id } => handle_cancel(client, &repo, run_id).await?,
-        RunCommands::Rerun { repo, run_id, failed } => handle_rerun(client, &repo, run_id, failed).await?,
+        RunCommands::Rerun {
+            repo,
+            run_id,
+            failed,
+        } => handle_rerun(client, &repo, run_id, failed).await?,
     }
     Ok(())
 }
@@ -88,8 +106,12 @@ async fn handle_list(
 }
 
 async fn handle_view(client: &Client, repo: &str, run_id: u64) -> Result<()> {
-    let run = client.get(&format!("/repos/{repo}/actions/runs/{run_id}")).await?;
-    let jobs = client.get(&format!("/repos/{repo}/actions/runs/{run_id}/jobs")).await?;
+    let run = client
+        .get(&format!("/repos/{repo}/actions/runs/{run_id}"))
+        .await?;
+    let jobs = client
+        .get(&format!("/repos/{repo}/actions/runs/{run_id}/jobs"))
+        .await?;
     print_run_detail(&run, &jobs);
     Ok(())
 }

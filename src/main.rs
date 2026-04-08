@@ -152,9 +152,11 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Config { token } => handle_config(config, token)?,
-        Commands::React { repo, number, reaction } => {
-            handle_react(&get_client(&config)?, &repo, number, &reaction).await?
-        }
+        Commands::React {
+            repo,
+            number,
+            reaction,
+        } => handle_react(&get_client(&config)?, &repo, number, &reaction).await?,
         Commands::Issue { command } => {
             commands::issue::handle(&get_client(&config)?, command).await?;
         }

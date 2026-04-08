@@ -43,7 +43,12 @@ impl Client {
         body: &serde_json::Value,
     ) -> Result<reqwest::Response> {
         let url = format!("https://api.github.com{path}");
-        let resp = self.http.request(method.clone(), &url).json(body).send().await?;
+        let resp = self
+            .http
+            .request(method.clone(), &url)
+            .json(body)
+            .send()
+            .await?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await?;
@@ -57,7 +62,11 @@ impl Client {
     }
 
     pub async fn post(&self, path: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
-        Ok(self.send_json(reqwest::Method::POST, path, body).await?.json().await?)
+        Ok(self
+            .send_json(reqwest::Method::POST, path, body)
+            .await?
+            .json()
+            .await?)
     }
 
     /// POST that expects no response body (e.g. 202 Cancel, 201 Rerun).

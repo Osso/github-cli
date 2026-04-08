@@ -91,22 +91,35 @@ pub enum PrCommands {
 
 pub async fn handle(client: &Client, command: PrCommands) -> Result<()> {
     match command {
-        PrCommands::List { repo, state, limit } => handle_list(client, &repo, &state, limit).await?,
-        PrCommands::View { repo, number } => handle_view(client, &repo, number).await?,
-        PrCommands::Comment { repo, number, message } => {
-            handle_comment(client, &repo, number, &message).await?
+        PrCommands::List { repo, state, limit } => {
+            handle_list(client, &repo, &state, limit).await?
         }
+        PrCommands::View { repo, number } => handle_view(client, &repo, number).await?,
+        PrCommands::Comment {
+            repo,
+            number,
+            message,
+        } => handle_comment(client, &repo, number, &message).await?,
         PrCommands::Comments { repo, number } => handle_comments(client, &repo, number).await?,
         PrCommands::Approve { repo, number } => handle_approve(client, &repo, number).await?,
-        PrCommands::Discussions { repo, number, unresolved: _ } => {
-            handle_discussions(client, &repo, number).await?
-        }
-        PrCommands::Reply { repo, number, comment, message } => {
-            handle_reply(client, &repo, number, comment, &message).await?
-        }
-        PrCommands::Review { repo, number, body, event, comments } => {
-            handle_review(client, &repo, number, body, event, comments).await?
-        }
+        PrCommands::Discussions {
+            repo,
+            number,
+            unresolved: _,
+        } => handle_discussions(client, &repo, number).await?,
+        PrCommands::Reply {
+            repo,
+            number,
+            comment,
+            message,
+        } => handle_reply(client, &repo, number, comment, &message).await?,
+        PrCommands::Review {
+            repo,
+            number,
+            body,
+            event,
+            comments,
+        } => handle_review(client, &repo, number, body, event, comments).await?,
     }
     Ok(())
 }
@@ -148,7 +161,13 @@ async fn handle_discussions(client: &Client, repo: &str, number: u64) -> Result<
     Ok(())
 }
 
-async fn handle_reply(client: &Client, repo: &str, number: u64, comment: u64, message: &str) -> Result<()> {
+async fn handle_reply(
+    client: &Client,
+    repo: &str,
+    number: u64,
+    comment: u64,
+    message: &str,
+) -> Result<()> {
     let result = reply_to_review_comment(client, repo, number, comment, message).await?;
     let id = result["id"].as_u64().unwrap_or(0);
     println!("Posted reply (id: {id}) to comment {comment}");

@@ -53,8 +53,22 @@ pub enum WebhookCommands {
 pub async fn handle(client: &Client, command: WebhookCommands) -> Result<()> {
     match command {
         WebhookCommands::List { repo } => handle_list(client, &repo).await?,
-        WebhookCommands::Create { repo, url, secret, events, content_type } => {
-            handle_create(client, &repo, &url, secret.as_deref(), &events, &content_type).await?
+        WebhookCommands::Create {
+            repo,
+            url,
+            secret,
+            events,
+            content_type,
+        } => {
+            handle_create(
+                client,
+                &repo,
+                &url,
+                secret.as_deref(),
+                &events,
+                &content_type,
+            )
+            .await?
         }
         WebhookCommands::Delete { repo, hook_id } => handle_delete(client, &repo, hook_id).await?,
         WebhookCommands::Ping { repo, hook_id } => handle_ping(client, &repo, hook_id).await?,
@@ -97,19 +111,25 @@ async fn handle_create(
 }
 
 async fn handle_delete(client: &Client, repo: &str, hook_id: u64) -> Result<()> {
-    client.delete(&format!("/repos/{repo}/hooks/{hook_id}")).await?;
+    client
+        .delete(&format!("/repos/{repo}/hooks/{hook_id}"))
+        .await?;
     println!("Deleted webhook {hook_id} from {repo}");
     Ok(())
 }
 
 async fn handle_ping(client: &Client, repo: &str, hook_id: u64) -> Result<()> {
-    client.post_empty(&format!("/repos/{repo}/hooks/{hook_id}/pings")).await?;
+    client
+        .post_empty(&format!("/repos/{repo}/hooks/{hook_id}/pings"))
+        .await?;
     println!("Pinged webhook {hook_id} on {repo}");
     Ok(())
 }
 
 async fn handle_deliveries(client: &Client, repo: &str, hook_id: u64) -> Result<()> {
-    let result = client.get(&format!("/repos/{repo}/hooks/{hook_id}/deliveries")).await?;
+    let result = client
+        .get(&format!("/repos/{repo}/hooks/{hook_id}/deliveries"))
+        .await?;
     print_deliveries(&result);
     Ok(())
 }
