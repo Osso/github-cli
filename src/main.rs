@@ -151,46 +151,33 @@ async fn main() -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
 
     match cli.command {
-        Commands::Config { token } => handle_config(config, token)?,
+        Commands::Config { token } => return handle_config(config, token),
+        command => {
+            let client = get_client(&config)?;
+            handle_authenticated_command(&client, command).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn handle_authenticated_command(client: &Client, command: Commands) -> Result<()> {
+    match command {
         Commands::React {
             repo,
             number,
             reaction,
-        } => handle_react(&get_client(&config)?, &repo, number, &reaction).await?,
-        Commands::Issue { command } => {
-            commands::issue::handle(&get_client(&config)?, command).await?;
-        }
-        Commands::Pr { command } => {
-            commands::pr::handle(&get_client(&config)?, command).await?;
-        }
-        Commands::Team { command } => {
-            commands::team::handle(&get_client(&config)?, command).await?;
-        }
-        Commands::Org { command } => {
-            commands::org::handle(&get_client(&config)?, command).await?;
-        }
-        Commands::Repo { command } => {
-            commands::repo::handle(&get_client(&config)?, command).await?;
-        }
-        Commands::App { command } => {
-            commands::app::handle(&get_client(&config)?, command).await?;
-        }
-        Commands::Runner { command } => {
-            commands::runner::handle(&get_client(&config)?, command).await?;
-        }
-        Commands::Run { command } => {
-            commands::run::handle(&get_client(&config)?, command).await?;
-        }
-        Commands::Code { command } => {
-            commands::code::handle(&get_client(&config)?, command).await?;
-        }
-        Commands::Secret { command } => {
-            commands::secret::handle(&get_client(&config)?, command).await?;
-        }
-        Commands::Webhook { command } => {
-            commands::webhook::handle(&get_client(&config)?, command).await?;
-        }
+        } => handle_react(client, &repo, number, &reaction).await,
+        Commands::Issue { command } => commands::issue::handle(client, command).await,
+        Commands::Pr { command } => commands::pr::handle(client, command).await,
+        Commands::Team { command } => commands::team::handle(client, command).await,
+        Commands::Org { command } => commands::org::handle(client, command).await,
+        Commands::Repo { command } => commands::repo::handle(client, command).await,
+        Commands::App { command } => commands::app::handle(client, command).await,
+        Commands::Runner { command } => commands::runner::handle(client, command).await,
+        Commands::Run { command } => commands::run::handle(client, command).await,
+        Commands::Code { command } => commands::code::handle(client, command).await,
+        Commands::Secret { command } => commands::secret::handle(client, command).await,
+        Commands::Webhook { command } => commands::webhook::handle(client, command).await,
+        Commands::Config { .. } => unreachable!("config command handled in main"),
     }
-
-    Ok(())
 }

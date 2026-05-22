@@ -96,6 +96,16 @@ github runner view owner/repo 1234            # View runner details
 github runner delete owner/repo 1234          # Delete runner
 ```
 
+### Workflow Runs
+
+```bash
+github run list owner/repo                    # List recent workflow runs
+github run view owner/repo 123456             # View run details and jobs
+github run watch owner/repo 123456            # Poll until the run completes
+github run watch owner/repo 123456 -i 10 -t 1800  # Poll every 10s, timeout after 30m
+github run logs owner/repo 123456             # Show failed job logs
+```
+
 ### Code Search
 
 ```bash

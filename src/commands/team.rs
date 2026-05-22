@@ -93,50 +93,76 @@ pub enum TeamCommands {
 
 pub async fn handle(client: &Client, command: TeamCommands) -> Result<()> {
     match command {
-        TeamCommands::List { org, limit } => handle_list(client, &org, limit).await?,
+        TeamCommands::List { org, limit } => handle_list(client, &org, limit).await,
         TeamCommands::Create {
             org,
             name,
             description,
             privacy,
             parent_team_id,
-        } => {
-            handle_create(
-                client,
-                &org,
-                &name,
-                description.as_deref(),
-                &privacy,
-                parent_team_id,
-            )
-            .await?
-        }
-        TeamCommands::View { org, team } => handle_view(client, &org, &team).await?,
+        } => handle_create_command(client, org, name, description, privacy, parent_team_id).await,
+        TeamCommands::View { org, team } => handle_view(client, &org, &team).await,
         TeamCommands::Members { org, team, limit } => {
-            handle_members(client, &org, &team, limit).await?
+            handle_members(client, &org, &team, limit).await
         }
         TeamCommands::AddMember {
             org,
             team,
             username,
             role,
-        } => handle_add_member(client, &org, &team, &username, &role).await?,
+        } => handle_add_member_command(client, org, team, username, role).await,
         TeamCommands::RemoveMember {
             org,
             team,
             username,
-        } => handle_remove_member(client, &org, &team, &username).await?,
+        } => handle_remove_member(client, &org, &team, &username).await,
         TeamCommands::AddRepo {
             org,
             team,
             repo,
             permission,
-        } => handle_add_repo(client, &org, &team, &repo, &permission).await?,
-        TeamCommands::Repos { org, team, limit } => {
-            handle_repos(client, &org, &team, limit).await?
-        }
+        } => handle_add_repo_command(client, org, team, repo, permission).await,
+        TeamCommands::Repos { org, team, limit } => handle_repos(client, &org, &team, limit).await,
     }
-    Ok(())
+}
+
+async fn handle_create_command(
+    client: &Client,
+    org: String,
+    name: String,
+    description: Option<String>,
+    privacy: String,
+    parent_team_id: Option<u64>,
+) -> Result<()> {
+    handle_create(
+        client,
+        &org,
+        &name,
+        description.as_deref(),
+        &privacy,
+        parent_team_id,
+    )
+    .await
+}
+
+async fn handle_add_member_command(
+    client: &Client,
+    org: String,
+    team: String,
+    username: String,
+    role: String,
+) -> Result<()> {
+    handle_add_member(client, &org, &team, &username, &role).await
+}
+
+async fn handle_add_repo_command(
+    client: &Client,
+    org: String,
+    team: String,
+    repo: String,
+    permission: String,
+) -> Result<()> {
+    handle_add_repo(client, &org, &team, &repo, &permission).await
 }
 
 async fn handle_list(client: &Client, org: &str, limit: u32) -> Result<()> {

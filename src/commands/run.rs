@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 use clap::Subcommand;
 use std::io::Read;
+use std::time::{Duration, Instant};
 
 use crate::client::Client;
 
@@ -29,6 +30,19 @@ pub enum RunCommands {
         repo: String,
         /// Run ID
         run_id: u64,
+    },
+    /// Poll a run until it reaches a terminal state
+    Watch {
+        /// Repository (owner/repo)
+        repo: String,
+        /// Run ID
+        run_id: u64,
+        /// Poll interval in seconds
+        #[arg(short, long, default_value = "30")]
+        interval: u64,
+        /// Maximum seconds to wait before exiting with an error
+        #[arg(short, long)]
+        timeout: Option<u64>,
     },
     /// Show logs for failed jobs in a run
     Logs {
@@ -61,24 +75,14 @@ pub enum RunCommands {
 
 pub async fn handle(client: &Client, command: RunCommands) -> Result<()> {
     match command {
-        RunCommands::List {
-            repo,
-            limit,
-            status,
-            branch,
-            workflow,
-        } => {
-            handle_list(
-                client,
-                &repo,
-                limit,
-                status.as_deref(),
-                branch.as_deref(),
-                workflow.as_deref(),
-            )
-            .await?
-        }
+        RunCommands::List { .. } => handle_list_command(client, command).await?,
         RunCommands::View { repo, run_id } => handle_view(client, &repo, run_id).await?,
+        RunCommands::Watch {
+            repo,
+            run_id,
+            interval,
+            timeout,
+        } => handle_watch(client, &repo, run_id, interval, timeout).await?,
         RunCommands::Logs { repo, run_id, job } => {
             show_logs(client, &repo, run_id, job.as_deref()).await?
         }
@@ -90,6 +94,29 @@ pub async fn handle(client: &Client, command: RunCommands) -> Result<()> {
         } => handle_rerun(client, &repo, run_id, failed).await?,
     }
     Ok(())
+}
+
+async fn handle_list_command(client: &Client, command: RunCommands) -> Result<()> {
+    let RunCommands::List {
+        repo,
+        limit,
+        status,
+        branch,
+        workflow,
+    } = command
+    else {
+        bail!("expected list command");
+    };
+
+    handle_list(
+        client,
+        &repo,
+        limit,
+        status.as_deref(),
+        branch.as_deref(),
+        workflow.as_deref(),
+    )
+    .await
 }
 
 async fn handle_list(
@@ -106,14 +133,62 @@ async fn handle_list(
 }
 
 async fn handle_view(client: &Client, repo: &str, run_id: u64) -> Result<()> {
+    let (run, jobs) = get_run_and_jobs(client, repo, run_id).await?;
+    print_run_detail(&run, &jobs);
+    Ok(())
+}
+
+async fn get_run_and_jobs(
+    client: &Client,
+    repo: &str,
+    run_id: u64,
+) -> Result<(serde_json::Value, serde_json::Value)> {
     let run = client
         .get(&format!("/repos/{repo}/actions/runs/{run_id}"))
         .await?;
     let jobs = client
         .get(&format!("/repos/{repo}/actions/runs/{run_id}/jobs"))
         .await?;
-    print_run_detail(&run, &jobs);
-    Ok(())
+    Ok((run, jobs))
+}
+
+async fn handle_watch(
+    client: &Client,
+    repo: &str,
+    run_id: u64,
+    interval_seconds: u64,
+    timeout_seconds: Option<u64>,
+) -> Result<()> {
+    if interval_seconds == 0 {
+        bail!("interval must be greater than 0 seconds");
+    }
+
+    let started = Instant::now();
+    let timeout = timeout_seconds.map(Duration::from_secs);
+    let interval = Duration::from_secs(interval_seconds);
+    let mut last_signature = String::new();
+
+    loop {
+        let (run, jobs) = get_run_and_jobs(client, repo, run_id).await?;
+        let signature = run_status_signature(&run, &jobs);
+        if signature != last_signature {
+            print_watch_snapshot(&run, &jobs);
+            last_signature = signature;
+        }
+
+        if is_terminal_run(&run) {
+            ensure_successful_run(&run)?;
+            return Ok(());
+        }
+
+        if let Some(timeout) = timeout
+            && started.elapsed() >= timeout
+        {
+            bail!("Timed out waiting for run {run_id}");
+        }
+
+        tokio::time::sleep(interval).await;
+    }
 }
 
 async fn handle_cancel(client: &Client, repo: &str, run_id: u64) -> Result<()> {
@@ -197,68 +272,189 @@ fn duration_between(start: &str, end: &str) -> String {
 }
 
 fn print_runs(value: &serde_json::Value, workflow_filter: Option<&str>, limit: u32) {
-    let empty = vec![];
-    let runs = value["workflow_runs"].as_array().unwrap_or(&empty);
+    let runs = value["workflow_runs"]
+        .as_array()
+        .map_or(&[][..], |r| r.as_slice());
+    print_runs_header();
+    for run in runs
+        .iter()
+        .filter(|run| run_matches_workflow_filter(run, workflow_filter))
+        .take(limit as usize)
+    {
+        print_run_row(run);
+    }
+}
 
+fn print_runs_header() {
     println!(
-        "{:<12} {:<12} {:<12} {:<30} {:<20} {:<10} {:<12} {}",
-        "ID", "Status", "Conclusion", "Workflow", "Branch", "Event", "Created", "Duration"
+        "{:<12} {:<12} {:<12} {:<30} {:<20} {:<10} {:<12} Duration",
+        "ID", "Status", "Conclusion", "Workflow", "Branch", "Event", "Created"
     );
     println!("{}", "-".repeat(120));
+}
 
-    let mut count = 0u32;
-    for run in runs {
-        let workflow_name = run["name"].as_str().unwrap_or("");
-        let workflow_file = run["path"].as_str().unwrap_or("");
-        if let Some(filter) = workflow_filter {
-            let matches = workflow_name.contains(filter) || workflow_file.contains(filter);
-            if !matches {
-                continue;
-            }
-        }
-        if count >= limit {
-            break;
-        }
-        count += 1;
+fn run_matches_workflow_filter(run: &serde_json::Value, workflow_filter: Option<&str>) -> bool {
+    let Some(filter) = workflow_filter else {
+        return true;
+    };
+    let workflow_name = run["name"].as_str().unwrap_or("");
+    let workflow_file = run["path"].as_str().unwrap_or("");
+    workflow_name.contains(filter) || workflow_file.contains(filter)
+}
 
-        let id = run["id"].as_u64().unwrap_or(0);
-        let status = run["status"].as_str().unwrap_or("-");
-        let conclusion = run["conclusion"].as_str().unwrap_or("-");
-        let branch = run["head_branch"].as_str().unwrap_or("-");
-        let event = run["event"].as_str().unwrap_or("-");
-        let created = run["created_at"]
-            .as_str()
-            .unwrap_or("")
-            .split('T')
-            .next()
-            .unwrap_or("-");
-        let started = run["run_started_at"].as_str().unwrap_or("");
-        let updated = run["updated_at"].as_str().unwrap_or("");
-        let duration = if started.is_empty() {
-            "-".to_string()
-        } else {
-            duration_between(started, updated)
-        };
+fn print_run_row(run: &serde_json::Value) {
+    let id = run["id"].as_u64().unwrap_or(0);
+    let status = run["status"].as_str().unwrap_or("-");
+    let conclusion = run["conclusion"].as_str().unwrap_or("-");
+    let workflow_name = run["name"].as_str().unwrap_or("");
+    let branch = run["head_branch"].as_str().unwrap_or("-");
+    let event = run["event"].as_str().unwrap_or("-");
+    let created = run["created_at"]
+        .as_str()
+        .unwrap_or("")
+        .split('T')
+        .next()
+        .unwrap_or("-");
+    let duration = run_duration(run);
+    let name_truncated = truncate_with_ellipsis(workflow_name, 29, 28);
+    let branch_truncated = truncate_with_ellipsis(branch, 19, 18);
+    println!(
+        "{:<12} {:<12} {:<12} {:<30} {:<20} {:<10} {:<12} {}",
+        id, status, conclusion, name_truncated, branch_truncated, event, created, duration
+    );
+}
 
-        let name_truncated = if workflow_name.len() > 29 {
-            format!("{}…", &workflow_name[..28])
-        } else {
-            workflow_name.to_string()
-        };
-        let branch_truncated = if branch.len() > 19 {
-            format!("{}…", &branch[..18])
-        } else {
-            branch.to_string()
-        };
+fn truncate_with_ellipsis(value: &str, max_len: usize, prefix_len: usize) -> String {
+    if value.len() > max_len {
+        return format!("{}…", &value[..prefix_len]);
+    }
+    value.to_string()
+}
 
+fn run_duration(run: &serde_json::Value) -> String {
+    let started = run["run_started_at"].as_str().unwrap_or("");
+    if started.is_empty() {
+        return "-".to_string();
+    }
+    let updated = run["updated_at"].as_str().unwrap_or("");
+    duration_between(started, updated)
+}
+
+fn print_run_detail(run: &serde_json::Value, jobs_value: &serde_json::Value) {
+    print_run_summary(run);
+    print_run_jobs(jobs_value);
+}
+
+fn print_watch_snapshot(run: &serde_json::Value, jobs_value: &serde_json::Value) {
+    print_run_summary(run);
+    let (completed, in_progress, queued, failed) = count_jobs(jobs_value);
+    println!(
+        "Jobs: {completed} completed, {in_progress} in_progress, {queued} queued, {failed} failed/cancelled"
+    );
+    print_active_jobs(jobs_value);
+    println!();
+}
+
+fn count_jobs(jobs_value: &serde_json::Value) -> (usize, usize, usize, usize) {
+    let jobs = jobs_value["jobs"]
+        .as_array()
+        .map_or(&[][..], |j| j.as_slice());
+    let completed = jobs
+        .iter()
+        .filter(|job| job["status"].as_str() == Some("completed"))
+        .count();
+    let in_progress = jobs
+        .iter()
+        .filter(|job| job["status"].as_str() == Some("in_progress"))
+        .count();
+    let queued = jobs
+        .iter()
+        .filter(|job| job["status"].as_str() == Some("queued"))
+        .count();
+    let failed = jobs.iter().filter(|job| is_failed_job(job)).count();
+    (completed, in_progress, queued, failed)
+}
+
+fn print_active_jobs(jobs_value: &serde_json::Value) {
+    let jobs = jobs_value["jobs"]
+        .as_array()
+        .map_or(&[][..], |j| j.as_slice());
+    let active_jobs: Vec<&serde_json::Value> = jobs
+        .iter()
+        .filter(|job| job["status"].as_str() != Some("completed"))
+        .collect();
+
+    if active_jobs.is_empty() {
+        print_run_jobs(jobs_value);
+        return;
+    }
+
+    println!(
+        "{:<40} {:<12} {:<12} Active step",
+        "Active job", "Status", "Conclusion"
+    );
+    println!("{}", "-".repeat(90));
+    for job in active_jobs {
+        let name = job["name"].as_str().unwrap_or("-");
+        let status = job["status"].as_str().unwrap_or("-");
+        let conclusion = job["conclusion"].as_str().unwrap_or("-");
+        let active_step = active_step_name(job);
+        let name_truncated = truncate_with_ellipsis(name, 39, 38);
         println!(
-            "{:<12} {:<12} {:<12} {:<30} {:<20} {:<10} {:<12} {}",
-            id, status, conclusion, name_truncated, branch_truncated, event, created, duration
+            "{:<40} {:<12} {:<12} {}",
+            name_truncated, status, conclusion, active_step
         );
     }
 }
 
-fn print_run_detail(run: &serde_json::Value, jobs_value: &serde_json::Value) {
+fn active_step_name(job: &serde_json::Value) -> &str {
+    let steps = job["steps"].as_array().map_or(&[][..], |s| s.as_slice());
+    steps
+        .iter()
+        .find(|step| step["status"].as_str() == Some("in_progress"))
+        .and_then(|step| step["name"].as_str())
+        .or_else(|| {
+            steps
+                .iter()
+                .find(|step| step["status"].as_str() == Some("queued"))
+                .and_then(|step| step["name"].as_str())
+        })
+        .unwrap_or("-")
+}
+
+fn run_status_signature(run: &serde_json::Value, jobs_value: &serde_json::Value) -> String {
+    let mut parts = vec![
+        run["status"].as_str().unwrap_or("-").to_string(),
+        run["conclusion"].as_str().unwrap_or("-").to_string(),
+        run["updated_at"].as_str().unwrap_or("-").to_string(),
+    ];
+    let jobs = jobs_value["jobs"]
+        .as_array()
+        .map_or(&[][..], |j| j.as_slice());
+    for job in jobs {
+        parts.push(format!(
+            "{}:{}:{}:{}",
+            job["id"].as_u64().unwrap_or(0),
+            job["status"].as_str().unwrap_or("-"),
+            job["conclusion"].as_str().unwrap_or("-"),
+            active_step_name(job)
+        ));
+    }
+    parts.join("|")
+}
+
+fn is_terminal_run(run: &serde_json::Value) -> bool {
+    run["status"].as_str() == Some("completed")
+}
+
+fn ensure_successful_run(run: &serde_json::Value) -> Result<()> {
+    match run["conclusion"].as_str().unwrap_or("") {
+        "success" => Ok(()),
+        conclusion => bail!("Run completed with conclusion: {conclusion}"),
+    }
+}
+
+fn print_run_summary(run: &serde_json::Value) {
     let id = run["id"].as_u64().unwrap_or(0);
     let name = run["name"].as_str().unwrap_or("");
     let status = run["status"].as_str().unwrap_or("-");
@@ -266,55 +462,50 @@ fn print_run_detail(run: &serde_json::Value, jobs_value: &serde_json::Value) {
     let branch = run["head_branch"].as_str().unwrap_or("-");
     let event = run["event"].as_str().unwrap_or("-");
     let created = run["created_at"].as_str().unwrap_or("-");
-    let started = run["run_started_at"].as_str().unwrap_or("");
-    let updated = run["updated_at"].as_str().unwrap_or("");
-    let duration = if started.is_empty() {
-        "-".to_string()
-    } else {
-        duration_between(started, updated)
-    };
+    let duration = run_duration(run);
     let url = run["html_url"].as_str().unwrap_or("");
-
     println!("Run: {name} (#{id})");
     println!("Status: {status}  Conclusion: {conclusion}");
     println!("Branch: {branch}  Event: {event}");
     println!("Created: {created}  Duration: {duration}");
     println!("URL: {url}");
     println!();
+}
 
-    let empty = vec![];
-    let jobs = jobs_value["jobs"].as_array().unwrap_or(&empty);
+fn print_run_jobs(jobs_value: &serde_json::Value) {
+    let jobs = jobs_value["jobs"]
+        .as_array()
+        .map_or(&[][..], |j| j.as_slice());
     if jobs.is_empty() {
         println!("No jobs found");
         return;
     }
-
     println!(
-        "{:<40} {:<12} {:<12} {}",
-        "Job", "Status", "Conclusion", "Duration"
+        "{:<40} {:<12} {:<12} Duration",
+        "Job", "Status", "Conclusion"
     );
     println!("{}", "-".repeat(80));
     for job in jobs {
-        let job_name = job["name"].as_str().unwrap_or("-");
-        let job_status = job["status"].as_str().unwrap_or("-");
-        let job_conclusion = job["conclusion"].as_str().unwrap_or("-");
-        let job_started = job["started_at"].as_str().unwrap_or("");
-        let job_completed = job["completed_at"].as_str().unwrap_or("");
-        let job_duration = if job_started.is_empty() {
-            "-".to_string()
-        } else {
-            duration_between(job_started, job_completed)
-        };
-        let name_truncated = if job_name.len() > 39 {
-            format!("{}…", &job_name[..38])
-        } else {
-            job_name.to_string()
-        };
-        println!(
-            "{:<40} {:<12} {:<12} {}",
-            name_truncated, job_status, job_conclusion, job_duration
-        );
+        print_run_job_row(job);
     }
+}
+
+fn print_run_job_row(job: &serde_json::Value) {
+    let job_name = job["name"].as_str().unwrap_or("-");
+    let job_status = job["status"].as_str().unwrap_or("-");
+    let job_conclusion = job["conclusion"].as_str().unwrap_or("-");
+    let job_started = job["started_at"].as_str().unwrap_or("");
+    let job_completed = job["completed_at"].as_str().unwrap_or("");
+    let job_duration = if job_started.is_empty() {
+        "-".to_string()
+    } else {
+        duration_between(job_started, job_completed)
+    };
+    let name_truncated = truncate_with_ellipsis(job_name, 39, 38);
+    println!(
+        "{:<40} {:<12} {:<12} {}",
+        name_truncated, job_status, job_conclusion, job_duration
+    );
 }
 
 async fn show_logs(
@@ -326,43 +517,59 @@ async fn show_logs(
     let jobs_value = client
         .get(&format!("/repos/{repo}/actions/runs/{run_id}/jobs"))
         .await?;
-    let empty = vec![];
-    let jobs = jobs_value["jobs"].as_array().unwrap_or(&empty);
-
-    let target_jobs: Vec<&serde_json::Value> = if let Some(name) = job_filter {
-        jobs.iter()
-            .filter(|j| j["name"].as_str().unwrap_or("").contains(name))
-            .collect()
-    } else {
-        // Default: show failed jobs
-        jobs.iter()
-            .filter(|j| {
-                let conclusion = j["conclusion"].as_str().unwrap_or("");
-                conclusion == "failure" || conclusion == "cancelled"
-            })
-            .collect()
-    };
-
-    if target_jobs.is_empty() {
-        if job_filter.is_some() {
-            bail!("No job matching that name found in run {run_id}");
-        } else {
-            println!("No failed jobs in run {run_id}");
-            return Ok(());
-        }
-    }
-
+    let jobs = jobs_value["jobs"]
+        .as_array()
+        .map_or(&[][..], |j| j.as_slice());
+    let target_jobs = select_target_jobs(jobs, job_filter);
+    ensure_target_jobs_exist(&target_jobs, run_id, job_filter)?;
     for job in target_jobs {
-        let job_id = job["id"].as_u64().unwrap_or(0);
-        let job_name = job["name"].as_str().unwrap_or("?");
-        println!("=== Job: {job_name} (id: {job_id}) ===");
-        let log_bytes = client
-            .get_bytes(&format!("/repos/{repo}/actions/jobs/{job_id}/logs"))
-            .await?;
-        extract_and_print_logs(&log_bytes, job_name)?;
-        println!();
+        print_job_logs(client, repo, job).await?;
     }
+    Ok(())
+}
 
+fn select_target_jobs<'a>(
+    jobs: &'a [serde_json::Value],
+    job_filter: Option<&str>,
+) -> Vec<&'a serde_json::Value> {
+    if let Some(name) = job_filter {
+        return jobs
+            .iter()
+            .filter(|job| job["name"].as_str().unwrap_or("").contains(name))
+            .collect();
+    }
+    jobs.iter().filter(|job| is_failed_job(job)).collect()
+}
+
+fn is_failed_job(job: &serde_json::Value) -> bool {
+    let conclusion = job["conclusion"].as_str().unwrap_or("");
+    conclusion == "failure" || conclusion == "cancelled"
+}
+
+fn ensure_target_jobs_exist(
+    target_jobs: &[&serde_json::Value],
+    run_id: u64,
+    job_filter: Option<&str>,
+) -> Result<()> {
+    if !target_jobs.is_empty() {
+        return Ok(());
+    }
+    if job_filter.is_some() {
+        bail!("No job matching that name found in run {run_id}");
+    }
+    println!("No failed jobs in run {run_id}");
+    Ok(())
+}
+
+async fn print_job_logs(client: &Client, repo: &str, job: &serde_json::Value) -> Result<()> {
+    let job_id = job["id"].as_u64().unwrap_or(0);
+    let job_name = job["name"].as_str().unwrap_or("?");
+    println!("=== Job: {job_name} (id: {job_id}) ===");
+    let log_bytes = client
+        .get_bytes(&format!("/repos/{repo}/actions/jobs/{job_id}/logs"))
+        .await?;
+    extract_and_print_logs(&log_bytes, job_name)?;
+    println!();
     Ok(())
 }
 

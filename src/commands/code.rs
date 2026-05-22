@@ -96,21 +96,34 @@ fn print_code_results(value: &serde_json::Value) {
     println!("Total: {total}");
     println!();
     for item in items {
-        let repo = item["repository"]["full_name"].as_str().unwrap_or("");
-        let path = item["path"].as_str().unwrap_or("");
-        let url = item["html_url"].as_str().unwrap_or("");
-        let text_matches = item["text_matches"].as_array();
-        println!("{repo}  {path}");
-        if let Some(matches) = text_matches {
-            for m in matches {
-                if let Some(fragment) = m["fragment"].as_str() {
-                    for line in fragment.lines().take(3) {
-                        println!("  {line}");
-                    }
-                }
-            }
-        }
-        println!("  {url}");
-        println!();
+        print_code_result_item(item);
+    }
+}
+
+fn print_code_result_item(item: &serde_json::Value) {
+    let repo = item["repository"]["full_name"].as_str().unwrap_or("");
+    let path = item["path"].as_str().unwrap_or("");
+    let url = item["html_url"].as_str().unwrap_or("");
+    println!("{repo}  {path}");
+    print_text_match_fragments(item["text_matches"].as_array());
+    println!("  {url}");
+    println!();
+}
+
+fn print_text_match_fragments(matches: Option<&Vec<serde_json::Value>>) {
+    let Some(matches) = matches else {
+        return;
+    };
+    for text_match in matches {
+        print_text_match_fragment(text_match);
+    }
+}
+
+fn print_text_match_fragment(text_match: &serde_json::Value) {
+    let Some(fragment) = text_match["fragment"].as_str() else {
+        return;
+    };
+    for line in fragment.lines().take(3) {
+        println!("  {line}");
     }
 }
