@@ -31,6 +31,13 @@ pub enum RunCommands {
         /// Run ID
         run_id: u64,
     },
+    /// View a specific workflow job's runner details and steps
+    Job {
+        /// Repository (owner/repo)
+        repo: String,
+        /// Job ID
+        job_id: u64,
+    },
     /// Poll a run until it reaches a terminal state
     Watch {
         /// Repository (owner/repo)
@@ -77,6 +84,7 @@ pub async fn handle(client: &Client, command: RunCommands) -> Result<()> {
     match command {
         RunCommands::List { .. } => handle_list_command(client, command).await?,
         RunCommands::View { repo, run_id } => handle_view(client, &repo, run_id).await?,
+        RunCommands::Job { repo, job_id } => handle_job(client, &repo, job_id).await?,
         RunCommands::Watch {
             repo,
             run_id,
@@ -93,6 +101,14 @@ pub async fn handle(client: &Client, command: RunCommands) -> Result<()> {
             failed,
         } => handle_rerun(client, &repo, run_id, failed).await?,
     }
+    Ok(())
+}
+
+async fn handle_job(client: &Client, repo: &str, job_id: u64) -> Result<()> {
+    let job = client
+        .get(&format!("/repos/{repo}/actions/jobs/{job_id}"))
+        .await?;
+    print_job_detail(&job);
     Ok(())
 }
 
@@ -338,6 +354,69 @@ fn run_duration(run: &serde_json::Value) -> String {
     }
     let updated = run["updated_at"].as_str().unwrap_or("");
     duration_between(started, updated)
+}
+
+fn print_job_detail(job: &serde_json::Value) {
+    let id = job["id"].as_u64().unwrap_or(0);
+    let name = job["name"].as_str().unwrap_or("");
+    let status = job["status"].as_str().unwrap_or("");
+    let conclusion = job["conclusion"].as_str().unwrap_or("");
+    let started = job["started_at"].as_str().unwrap_or("");
+    let completed = job["completed_at"].as_str().unwrap_or("");
+    let runner_id = job["runner_id"].as_u64().unwrap_or(0);
+    let runner_name = job["runner_name"].as_str().unwrap_or("");
+    let runner_group_id = job["runner_group_id"].as_u64().unwrap_or(0);
+    let runner_group_name = job["runner_group_name"].as_str().unwrap_or("");
+    let labels = string_array(&job["labels"]);
+
+    println!("Job: {name}");
+    println!("ID: {id}");
+    println!("Status: {status}");
+    println!("Conclusion: {conclusion}");
+    println!("Started: {started}");
+    println!("Completed: {completed}");
+    println!("Runner ID: {runner_id}");
+    println!("Runner name: {runner_name}");
+    println!("Runner group ID: {runner_group_id}");
+    println!("Runner group name: {runner_group_name}");
+    println!("Labels: {}", labels.join(", "));
+    println!();
+    print_job_steps(job);
+}
+
+fn string_array(value: &serde_json::Value) -> Vec<&str> {
+    value
+        .as_array()
+        .map(|items| items.iter().filter_map(|item| item.as_str()).collect())
+        .unwrap_or_default()
+}
+
+fn print_job_steps(job: &serde_json::Value) {
+    let steps = job["steps"].as_array().map_or(&[][..], |s| s.as_slice());
+    if steps.is_empty() {
+        println!("No steps reported");
+        return;
+    }
+    println!(
+        "{:<6} {:<35} {:<12} {:<12} Duration",
+        "Num", "Step", "Status", "Conclusion"
+    );
+    println!("{}", "-".repeat(90));
+    for step in steps {
+        let number = step["number"].as_u64().unwrap_or(0);
+        let name = step["name"].as_str().unwrap_or("");
+        let status = step["status"].as_str().unwrap_or("");
+        let conclusion = step["conclusion"].as_str().unwrap_or("");
+        let started = step["started_at"].as_str().unwrap_or("");
+        let completed = step["completed_at"].as_str().unwrap_or("");
+        println!(
+            "{number:<6} {:<35} {:<12} {:<12} {}",
+            truncate_with_ellipsis(name, 34, 33),
+            status,
+            conclusion,
+            duration_between(started, completed)
+        );
+    }
 }
 
 fn print_run_detail(run: &serde_json::Value, jobs_value: &serde_json::Value) {
