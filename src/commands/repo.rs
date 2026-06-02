@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
+use base64::Engine;
 use clap::Subcommand;
 
 use crate::client::Client;
@@ -15,6 +16,16 @@ pub enum RepoCommands {
     Branches {
         /// Repository (owner/repo)
         repo: String,
+    },
+    /// Print a file from a repository
+    Content {
+        /// Repository (owner/repo)
+        repo: String,
+        /// File path in the repository
+        path: String,
+        /// Git ref (branch, tag, or SHA)
+        #[arg(long = "ref")]
+        git_ref: Option<String>,
     },
     /// Manage branch protection rules
     Protect {
@@ -105,6 +116,11 @@ pub async fn handle(client: &Client, command: RepoCommands) -> Result<()> {
     match command {
         RepoCommands::List { org } => list_repos(client, &org).await,
         RepoCommands::Branches { repo } => list_branches(client, &repo).await,
+        RepoCommands::Content {
+            repo,
+            path,
+            git_ref,
+        } => print_content(client, &repo, &path, git_ref.as_deref()).await,
         RepoCommands::Protect { command } => handle_protect(client, command).await,
         RepoCommands::Keys { command } => handle_keys(client, command).await,
         RepoCommands::Hooks { command } => handle_hooks(client, command).await,
@@ -128,6 +144,46 @@ async fn list_branches(client: &Client, repo: &str) -> Result<()> {
         .await?;
     print_branches(&result);
     Ok(())
+}
+
+async fn print_content(
+    client: &Client,
+    repo: &str,
+    path: &str,
+    git_ref: Option<&str>,
+) -> Result<()> {
+    let encoded_path = encode_repo_path(path);
+    let mut api_path = format!("/repos/{repo}/contents/{encoded_path}");
+    if let Some(git_ref) = git_ref {
+        api_path.push_str("?ref=");
+        api_path.push_str(&urlencoding::encode(git_ref));
+    }
+
+    let result = client.get(&api_path).await?;
+    if result.is_array() {
+        bail!("{repo}:{path} is a directory, not a file");
+    }
+
+    let encoding = result["encoding"].as_str().unwrap_or("");
+    if encoding != "base64" {
+        bail!("{repo}:{path} has unsupported encoding '{encoding}'");
+    }
+
+    let Some(content) = result["content"].as_str() else {
+        bail!("{repo}:{path} response did not include file content");
+    };
+    let normalized = content.lines().collect::<String>();
+    let decoded = base64::engine::general_purpose::STANDARD.decode(normalized)?;
+    print!("{}", String::from_utf8_lossy(&decoded));
+    Ok(())
+}
+
+fn encode_repo_path(path: &str) -> String {
+    path.split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(urlencoding::encode)
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 async fn handle_protect(client: &Client, command: ProtectCommands) -> Result<()> {
