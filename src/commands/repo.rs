@@ -110,6 +110,14 @@ pub enum ProtectCommands {
         #[arg(short, long)]
         branch: String,
     },
+    /// Remove branch protection
+    Delete {
+        /// Repository (owner/repo)
+        repo: String,
+        /// Branch name
+        #[arg(short, long)]
+        branch: String,
+    },
 }
 
 pub async fn handle(client: &Client, command: RepoCommands) -> Result<()> {
@@ -194,7 +202,16 @@ async fn handle_protect(client: &Client, command: ProtectCommands) -> Result<()>
             check,
         } => set_protection(client, &repo, &branch, &check).await,
         ProtectCommands::Get { repo, branch } => get_protection(client, &repo, &branch).await,
+        ProtectCommands::Delete { repo, branch } => delete_protection(client, &repo, &branch).await,
     }
+}
+
+async fn delete_protection(client: &Client, repo: &str, branch: &str) -> Result<()> {
+    client
+        .delete(&format!("/repos/{repo}/branches/{branch}/protection"))
+        .await?;
+    println!("Removed branch protection for {repo}:{branch}");
+    Ok(())
 }
 
 async fn set_protection(
