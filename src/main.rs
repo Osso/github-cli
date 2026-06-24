@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 
@@ -102,6 +104,7 @@ enum Commands {
     },
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn get_client(config: &Config) -> Result<Client> {
     let token = config.get_token().ok_or_else(|| {
         anyhow!("No token. Set GITHUB_TOKEN or run: github config --token <token>")
@@ -109,6 +112,7 @@ fn get_client(config: &Config) -> Result<Client> {
     Client::new(&token)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn handle_config(config: Config, token: Option<String>) -> Result<()> {
     let mut config = config;
     if let Some(t) = token {
@@ -135,6 +139,7 @@ fn handle_config(config: Config, token: Option<String>) -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn handle_react(client: &Client, repo: &str, number: u64, reaction: &str) -> Result<()> {
     let path = format!("/repos/{repo}/issues/{number}/reactions");
     let result = client
@@ -146,6 +151,7 @@ async fn handle_react(client: &Client, repo: &str, number: u64, reaction: &str) 
 }
 
 #[tokio::main]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let config = Config::load().context("Failed to load config")?;
@@ -160,6 +166,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn handle_authenticated_command(client: &Client, command: Commands) -> Result<()> {
     match command {
         Commands::React {

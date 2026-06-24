@@ -80,6 +80,7 @@ pub enum RunCommands {
     },
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn handle(client: &Client, command: RunCommands) -> Result<()> {
     match command {
         RunCommands::List { .. } => handle_list_command(client, command).await?,
@@ -104,6 +105,7 @@ pub async fn handle(client: &Client, command: RunCommands) -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn handle_job(client: &Client, repo: &str, job_id: u64) -> Result<()> {
     let job = client
         .get(&format!("/repos/{repo}/actions/jobs/{job_id}"))
@@ -112,6 +114,7 @@ async fn handle_job(client: &Client, repo: &str, job_id: u64) -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn handle_list_command(client: &Client, command: RunCommands) -> Result<()> {
     let RunCommands::List {
         repo,
@@ -135,6 +138,7 @@ async fn handle_list_command(client: &Client, command: RunCommands) -> Result<()
     .await
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn handle_list(
     client: &Client,
     repo: &str,
@@ -148,12 +152,14 @@ async fn handle_list(
     Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn handle_view(client: &Client, repo: &str, run_id: u64) -> Result<()> {
     let (run, jobs) = get_run_and_jobs(client, repo, run_id).await?;
     print_run_detail(&run, &jobs);
     Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn get_run_and_jobs(
     client: &Client,
     repo: &str,
@@ -168,6 +174,7 @@ async fn get_run_and_jobs(
     Ok((run, jobs))
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn handle_watch(
     client: &Client,
     repo: &str,
@@ -207,6 +214,7 @@ async fn handle_watch(
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn handle_cancel(client: &Client, repo: &str, run_id: u64) -> Result<()> {
     client
         .post_empty(&format!("/repos/{repo}/actions/runs/{run_id}/cancel"))
@@ -215,6 +223,7 @@ async fn handle_cancel(client: &Client, repo: &str, run_id: u64) -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn handle_rerun(client: &Client, repo: &str, run_id: u64, failed: bool) -> Result<()> {
     let path = if failed {
         format!("/repos/{repo}/actions/runs/{run_id}/rerun-failed-jobs")
@@ -227,6 +236,7 @@ async fn handle_rerun(client: &Client, repo: &str, run_id: u64, failed: bool) ->
     Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn list_runs(
     client: &Client,
     repo: &str,
@@ -287,6 +297,7 @@ fn duration_between(start: &str, end: &str) -> String {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn print_runs(value: &serde_json::Value, workflow_filter: Option<&str>, limit: u32) {
     let runs = value["workflow_runs"]
         .as_array()
@@ -301,6 +312,7 @@ fn print_runs(value: &serde_json::Value, workflow_filter: Option<&str>, limit: u
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn print_runs_header() {
     println!(
         "{:<12} {:<12} {:<12} {:<30} {:<20} {:<10} {:<12} Duration",
@@ -318,6 +330,7 @@ fn run_matches_workflow_filter(run: &serde_json::Value, workflow_filter: Option<
     workflow_name.contains(filter) || workflow_file.contains(filter)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn print_run_row(run: &serde_json::Value) {
     let id = run["id"].as_u64().unwrap_or(0);
     let status = run["status"].as_str().unwrap_or("-");
@@ -356,6 +369,7 @@ fn run_duration(run: &serde_json::Value) -> String {
     duration_between(started, updated)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn print_job_detail(job: &serde_json::Value) {
     let id = job["id"].as_u64().unwrap_or(0);
     let name = job["name"].as_str().unwrap_or("");
@@ -391,6 +405,7 @@ fn string_array(value: &serde_json::Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn print_job_steps(job: &serde_json::Value) {
     let steps = job["steps"].as_array().map_or(&[][..], |s| s.as_slice());
     if steps.is_empty() {
@@ -419,11 +434,13 @@ fn print_job_steps(job: &serde_json::Value) {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn print_run_detail(run: &serde_json::Value, jobs_value: &serde_json::Value) {
     print_run_summary(run);
     print_run_jobs(jobs_value);
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn print_watch_snapshot(run: &serde_json::Value, jobs_value: &serde_json::Value) {
     print_run_summary(run);
     let (completed, in_progress, queued, failed) = count_jobs(jobs_value);
@@ -454,6 +471,7 @@ fn count_jobs(jobs_value: &serde_json::Value) -> (usize, usize, usize, usize) {
     (completed, in_progress, queued, failed)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn print_active_jobs(jobs_value: &serde_json::Value) {
     let jobs = jobs_value["jobs"]
         .as_array()
@@ -533,6 +551,7 @@ fn ensure_successful_run(run: &serde_json::Value) -> Result<()> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn print_run_summary(run: &serde_json::Value) {
     let id = run["id"].as_u64().unwrap_or(0);
     let name = run["name"].as_str().unwrap_or("");
@@ -551,6 +570,7 @@ fn print_run_summary(run: &serde_json::Value) {
     println!();
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn print_run_jobs(jobs_value: &serde_json::Value) {
     let jobs = jobs_value["jobs"]
         .as_array()
@@ -569,6 +589,7 @@ fn print_run_jobs(jobs_value: &serde_json::Value) {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn print_run_job_row(job: &serde_json::Value) {
     let job_name = job["name"].as_str().unwrap_or("-");
     let job_status = job["status"].as_str().unwrap_or("-");
@@ -587,6 +608,7 @@ fn print_run_job_row(job: &serde_json::Value) {
     );
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn show_logs(
     client: &Client,
     repo: &str,
@@ -640,6 +662,7 @@ fn ensure_target_jobs_exist(
     Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn print_job_logs(client: &Client, repo: &str, job: &serde_json::Value) -> Result<()> {
     let job_id = job["id"].as_u64().unwrap_or(0);
     let job_name = job["name"].as_str().unwrap_or("?");
@@ -652,6 +675,7 @@ async fn print_job_logs(client: &Client, repo: &str, job: &serde_json::Value) ->
     Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn extract_and_print_logs(data: &bytes::Bytes, job_name: &str) -> Result<()> {
     // The API redirects to a zip archive. reqwest follows the redirect, so we receive the zip.
     if data.starts_with(b"PK") {
@@ -676,3 +700,7 @@ fn extract_and_print_logs(data: &bytes::Bytes, job_name: &str) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "run_tests.rs"]
+mod tests;

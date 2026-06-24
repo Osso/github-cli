@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, coverage(off))]
+
 use anyhow::{Result, bail};
 use base64::Engine;
 use clap::Subcommand;
