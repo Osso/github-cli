@@ -84,8 +84,16 @@ github repo keys list owner/repo              # List deploy keys
 github repo keys add owner/repo -t "CI" key.pub  # Add deploy key
 github repo keys add owner/repo -t "CI" key.pub -w  # With write access
 github repo keys remove owner/repo 12345      # Remove deploy key
-github repo hooks list owner/repo             # List webhooks
+github repo hooks list owner/repo             # List webhooks (URLs redacted)
 ```
+
+Create a webhook with a secret-bearing payload URL through stdin so it never appears in process arguments or successful output:
+
+```bash
+printf '%s\n' 'https://example.test/hook?token=secret' | github webhook create owner/repo --url-stdin
+```
+
+Legacy `--url` and `--secret` remain available, but inline secret-bearing URLs are unsafe; use `--url-stdin`. Webhook listings remove query strings and fragments and mark them `[query redacted]`.
 
 ### Runners
 

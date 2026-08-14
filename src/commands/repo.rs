@@ -5,6 +5,7 @@ use base64::Engine;
 use clap::Subcommand;
 
 use crate::client::Client;
+use crate::commands::webhook::redact_webhook_url;
 
 #[derive(Subcommand)]
 pub enum RepoCommands {
@@ -430,7 +431,7 @@ fn print_hooks(value: &serde_json::Value) {
         let id = hook["id"].as_u64().unwrap_or(0);
         let name = hook["name"].as_str().unwrap_or("");
         let active = hook["active"].as_bool().unwrap_or(false);
-        let url = hook["config"]["url"].as_str().unwrap_or("");
+        let url = redact_webhook_url(hook["config"]["url"].as_str().unwrap_or(""));
         let events: Vec<&str> = hook["events"]
             .as_array()
             .map(|arr| arr.iter().filter_map(|e| e.as_str()).collect())
