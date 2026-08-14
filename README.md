@@ -84,16 +84,17 @@ github repo keys list owner/repo              # List deploy keys
 github repo keys add owner/repo -t "CI" key.pub  # Add deploy key
 github repo keys add owner/repo -t "CI" key.pub -w  # With write access
 github repo keys remove owner/repo 12345      # Remove deploy key
-github repo hooks list owner/repo             # List webhooks (URLs redacted)
+github repo hooks list owner/repo             # List webhooks; URLs are redacted
+github webhook list owner/repo                # List webhooks; URLs are redacted
 ```
 
-Create a webhook with a secret-bearing payload URL through stdin so it never appears in process arguments or successful output:
+Create a webhook with a secret-bearing payload URL through stdin so it never appears in process arguments or successful output. Read it from a protected file or another stdin source; do not put the URL literal in shell history:
 
 ```bash
-printf '%s\n' 'https://example.test/hook?token=secret' | github webhook create owner/repo --url-stdin
+github webhook create owner/repo --url-stdin < /path/to/protected-webhook-url
 ```
 
-Legacy `--url` and `--secret` remain available, but inline secret-bearing URLs are unsafe; use `--url-stdin`. Webhook listings remove query strings and fragments and mark them `[query redacted]`.
+Legacy `--url` and `--secret` remain available, but inline secret-bearing URLs or secrets are unsafe because they appear in process arguments; use `--url-stdin` for secret-bearing URLs. Both webhook list commands remove query strings and fragments and mark them `[query redacted]`. Invalid webhook URLs are rendered as `[redacted webhook URL]`. Webhook creation failures report only the method, API path, and HTTP status; response bodies and submitted URLs are not included.
 
 ### Runners
 
