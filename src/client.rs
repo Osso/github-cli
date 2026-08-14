@@ -4,15 +4,21 @@ use anyhow::{Result, bail};
 use std::future::Future;
 use std::time::Duration;
 
+const API_BASE_URL: &str = "https://api.github.com";
 const GET_RETRY_ATTEMPTS: usize = 3;
 const GET_RETRY_DELAY: Duration = Duration::from_secs(2);
 
 pub struct Client {
     pub http: reqwest::Client,
+    base_url: String,
 }
 
 impl Client {
     pub fn new(token: &str) -> Result<Self> {
+        Self::with_base_url(token, API_BASE_URL)
+    }
+
+    fn with_base_url(token: &str, base_url: &str) -> Result<Self> {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::AUTHORIZATION,
@@ -29,7 +35,19 @@ impl Client {
             .default_headers(headers)
             .build()?;
 
-        Ok(Self { http })
+        Ok(Self {
+            http,
+            base_url: base_url.trim_end_matches('/').to_owned(),
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(token: &str, base_url: &str) -> Result<Self> {
+        Self::with_base_url(token, base_url)
+    }
+
+    fn endpoint(&self, path: &str) -> String {
+        format!("{}{path}", self.base_url)
     }
 
     async fn send(&self, method: reqwest::Method, path: &str) -> Result<reqwest::Response> {
@@ -74,6 +92,19 @@ impl Client {
             .await?
             .json()
             .await?)
+    }
+
+    pub(crate) async fn post_json_redacted(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let url = self.endpoint(path);
+        let response = self.http.post(url).json(body).send().await?;
+        if !response.status().is_success() {
+            bail!("POST {path} failed ({})", response.status());
+        }
+        Ok(response.json().await?)
     }
 
     /// POST that expects no response body (e.g. 202 Cancel, 201 Rerun).
@@ -201,6 +232,95 @@ fn is_transient_reqwest_error(error: &reqwest::Error) -> bool {
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn spawn_http_fixture(status: &str, body: &str) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let status = status.to_owned();
+        let body = body.to_owned();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            read_http_request(&mut stream);
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        (format!("http://{address}"), server)
+    }
+
+    fn read_http_request(stream: &mut std::net::TcpStream) {
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let bytes_read = stream.read(&mut buffer).unwrap();
+            if bytes_read == 0 {
+                return;
+            }
+            request.extend_from_slice(&buffer[..bytes_read]);
+            let Some(headers_end) = request.windows(4).position(|window| window == b"\r\n\r\n")
+            else {
+                continue;
+            };
+            let headers = String::from_utf8_lossy(&request[..headers_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length").then_some(value)
+                })
+                .and_then(|value| value.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            if request.len() >= headers_end + 4 + content_length {
+                return;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn redacted_json_post_omits_response_body_from_display_and_debug() {
+        let canary = "https://curseforge.example/upload?token=response-body-canary";
+        let (base_url, server) = spawn_http_fixture(
+            "422 Unprocessable Entity",
+            &format!(r#"{{"message":"{canary}"}}"#),
+        );
+        let client = Client::for_test("request-token", &base_url).unwrap();
+        let body = serde_json::json!({"config": {"url": "https://curseforge.example?token=submitted-json-canary"}});
+
+        let error = client
+            .post_json_redacted("/repos/Osso/SpellMeter/hooks", &body)
+            .await
+            .unwrap_err();
+        server.join().unwrap();
+
+        let display = error.to_string();
+        let debug = format!("{error:?}");
+        assert!(
+            display.contains("POST /repos/Osso/SpellMeter/hooks failed (422 Unprocessable Entity)")
+        );
+        assert!(!display.contains(canary));
+        assert!(!display.contains("submitted-json-canary"));
+        assert!(!debug.contains(canary));
+        assert!(!debug.contains("submitted-json-canary"));
+    }
+
+    #[tokio::test]
+    async fn redacted_json_post_preserves_successful_json_parsing() {
+        let (base_url, server) = spawn_http_fixture("201 Created", r#"{"id":1234}"#);
+        let client = Client::for_test("request-token", &base_url).unwrap();
+
+        let response = client
+            .post_json_redacted("/repos/Osso/SpellMeter/hooks", &serde_json::json!({}))
+            .await
+            .unwrap();
+        server.join().unwrap();
+
+        assert_eq!(response["id"], 1234);
+    }
 
     #[tokio::test]
     async fn retry_transient_retries_until_operation_succeeds() {

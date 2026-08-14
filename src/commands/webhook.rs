@@ -123,7 +123,9 @@ async fn handle_create(
         "events": events,
         "config": config,
     });
-    let result = client.post(&format!("/repos/{repo}/hooks"), &body).await?;
+    let result = client
+        .post_json_redacted(&format!("/repos/{repo}/hooks"), &body)
+        .await?;
     let id = result["id"].as_u64().unwrap_or(0);
     println!("Created webhook {id} on {repo}");
     Ok(())
@@ -234,9 +236,85 @@ fn print_deliveries(value: &serde_json::Value) {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::io::{Cursor, Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
 
-    use super::{read_url_from_stdin, redact_webhook_url};
+    use super::{handle_create, read_url_from_stdin, redact_webhook_url};
+    use crate::client::Client;
+
+    fn spawn_http_fixture(body: &str) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let body = body.to_owned();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            read_http_request(&mut stream);
+            let response = format!(
+                "HTTP/1.1 422 Unprocessable Entity\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        (format!("http://{address}"), server)
+    }
+
+    fn read_http_request(stream: &mut std::net::TcpStream) {
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let bytes_read = stream.read(&mut buffer).unwrap();
+            if bytes_read == 0 {
+                return;
+            }
+            request.extend_from_slice(&buffer[..bytes_read]);
+            let Some(headers_end) = request.windows(4).position(|window| window == b"\r\n\r\n")
+            else {
+                continue;
+            };
+            let headers = String::from_utf8_lossy(&request[..headers_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length").then_some(value)
+                })
+                .and_then(|value| value.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            if request.len() >= headers_end + 4 + content_length {
+                return;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn create_error_redacts_secret_url_from_command_error() {
+        let canary = "https://curseforge.example/upload?token=command-error-canary";
+        let (base_url, server) = spawn_http_fixture(&format!(r#"{{"message":"{canary}"}}"#));
+        let client = Client::for_test("request-token", &base_url).unwrap();
+
+        let error = handle_create(
+            &client,
+            "Osso/SpellMeter",
+            "https://curseforge.example/upload?token=submitted-command-canary",
+            None,
+            "push",
+            "json",
+        )
+        .await
+        .unwrap_err();
+        server.join().unwrap();
+
+        let display = error.to_string();
+        let debug = format!("{error:?}");
+        assert!(
+            display.contains("POST /repos/Osso/SpellMeter/hooks failed (422 Unprocessable Entity)")
+        );
+        assert!(!display.contains(canary));
+        assert!(!display.contains("submitted-command-canary"));
+        assert!(!debug.contains(canary));
+        assert!(!debug.contains("submitted-command-canary"));
+    }
 
     #[test]
     fn reads_one_url_and_ignores_terminal_whitespace() {
