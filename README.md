@@ -5,7 +5,7 @@ GitHub CLI for managing issues, pull requests, teams, organizations, runners, an
 ## Install
 
 ```bash
-cargo install --path .
+./deploy.sh
 ```
 
 ## Authentication
@@ -137,4 +137,10 @@ github app list myorg                         # List app installations
 
 ```bash
 github config --token ghp_xxx                 # Save token
+```
+
+## Development
+
+```bash
+./run-tests.sh
 ```
