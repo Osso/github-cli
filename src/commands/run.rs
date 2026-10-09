@@ -20,6 +20,9 @@ pub enum RunCommands {
         /// Filter by branch
         #[arg(short, long)]
         branch: Option<String>,
+        /// Filter by full commit SHA
+        #[arg(long)]
+        sha: Option<String>,
         /// Filter by workflow name or filename
         #[arg(short, long)]
         workflow: Option<String>,
@@ -121,34 +124,22 @@ async fn handle_list_command(client: &Client, command: RunCommands) -> Result<()
         limit,
         status,
         branch,
+        sha,
         workflow,
     } = command
     else {
         bail!("expected list command");
     };
 
-    handle_list(
-        client,
+    let path = runs_path(
         &repo,
         limit,
         status.as_deref(),
         branch.as_deref(),
-        workflow.as_deref(),
-    )
-    .await
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-async fn handle_list(
-    client: &Client,
-    repo: &str,
-    limit: u32,
-    status: Option<&str>,
-    branch: Option<&str>,
-    workflow: Option<&str>,
-) -> Result<()> {
-    let result = list_runs(client, repo, limit, status, branch).await?;
-    print_runs(&result, workflow, limit);
+        sha.as_deref(),
+    );
+    let result = client.get(&path).await?;
+    print_runs(&result, workflow.as_deref(), limit);
     Ok(())
 }
 
@@ -236,14 +227,13 @@ async fn handle_rerun(client: &Client, repo: &str, run_id: u64, failed: bool) ->
     Ok(())
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
-async fn list_runs(
-    client: &Client,
+fn runs_path(
     repo: &str,
     limit: u32,
     status: Option<&str>,
     branch: Option<&str>,
-) -> Result<serde_json::Value> {
+    sha: Option<&str>,
+) -> String {
     let mut path = format!("/repos/{repo}/actions/runs?per_page={limit}");
     if let Some(s) = status {
         path.push_str(&format!("&status={s}"));
@@ -251,7 +241,10 @@ async fn list_runs(
     if let Some(b) = branch {
         path.push_str(&format!("&branch={}", urlencoding::encode(b)));
     }
-    client.get(&path).await
+    if let Some(sha) = sha {
+        path.push_str(&format!("&head_sha={}", urlencoding::encode(sha)));
+    }
+    path
 }
 
 fn format_duration_secs(secs: i64) -> String {

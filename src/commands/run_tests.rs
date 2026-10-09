@@ -123,3 +123,21 @@ fn ensure_target_jobs_exist_reports_missing_filter() {
     assert!(ensure_target_jobs_exist(&empty, 42, None).is_ok());
     assert!(ensure_target_jobs_exist(&empty, 42, Some("missing")).is_err());
 }
+
+#[test]
+fn runs_path_filters_by_commit_sha() {
+    assert_eq!(
+        runs_path(
+            "Osso/wow-ui-sim",
+            5,
+            None,
+            None,
+            Some("e20c472caa43b2a422cef615579d03b22bf51866")
+        ),
+        "/repos/Osso/wow-ui-sim/actions/runs?per_page=5&head_sha=e20c472caa43b2a422cef615579d03b22bf51866"
+    );
+    assert_eq!(
+        runs_path("o/r", 10, Some("completed"), Some("feat/x"), None),
+        "/repos/o/r/actions/runs?per_page=10&status=completed&branch=feat%2Fx"
+    );
+}
