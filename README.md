@@ -8,6 +8,13 @@ GitHub CLI for managing issues, pull requests, teams, organizations, runners, an
 ./deploy.sh
 ```
 
+## TLS trust dependencies
+
+HTTP clients use reqwest with Rustls and compiled-in CA roots. `Cargo.lock` pins
+`webpki-roots 1.0.10` and `rustls-webpki 0.103.16`; Docker worker builds must
+consume this lockfile with `--locked`. Updating OS CA certificates alone does
+not refresh these compiled dependencies.
+
 ## Authentication
 
 Token is resolved in order:
