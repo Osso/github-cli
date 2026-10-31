@@ -1,6 +1,6 @@
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 
 use crate::client::Client;
@@ -49,6 +49,28 @@ pub enum PrCommands {
         repo: String,
         /// PR number
         number: u64,
+    },
+    /// Merge a pull request
+    Merge {
+        /// Repository (owner/repo)
+        repo: String,
+        /// PR number
+        number: u64,
+        /// Create a merge commit (default)
+        #[arg(long, conflicts_with_all = ["squash", "rebase"])]
+        merge: bool,
+        /// Squash commits
+        #[arg(long, conflicts_with_all = ["merge", "rebase"])]
+        squash: bool,
+        /// Rebase commits
+        #[arg(long, conflicts_with_all = ["merge", "squash"])]
+        rebase: bool,
+        /// Expected head SHA
+        #[arg(long)]
+        sha: Option<String>,
+        /// Delete a same-repository head branch after merging
+        #[arg(long)]
+        delete_branch: bool,
     },
     /// List review comments (discussions) on a PR
     Discussions {
@@ -104,6 +126,24 @@ pub async fn handle(client: &Client, command: PrCommands) -> Result<()> {
         } => handle_comment(client, &repo, number, &message).await?,
         PrCommands::Comments { repo, number } => handle_comments(client, &repo, number).await?,
         PrCommands::Approve { repo, number } => handle_approve(client, &repo, number).await?,
+        PrCommands::Merge {
+            repo,
+            number,
+            merge: _,
+            squash,
+            rebase,
+            sha,
+            delete_branch,
+        } => {
+            let method = if squash {
+                "squash"
+            } else if rebase {
+                "rebase"
+            } else {
+                "merge"
+            };
+            merge_pr(client, &repo, number, method, sha.as_deref(), delete_branch).await?;
+        }
         PrCommands::Discussions {
             repo,
             number,
@@ -154,6 +194,66 @@ async fn handle_comments(client: &Client, repo: &str, number: u64) -> Result<()>
 async fn handle_approve(client: &Client, repo: &str, number: u64) -> Result<()> {
     approve_pr(client, repo, number).await?;
     println!("Approved {repo}#{number}");
+    Ok(())
+}
+
+async fn merge_pr(
+    client: &Client,
+    repo: &str,
+    number: u64,
+    method: &str,
+    sha: Option<&str>,
+    delete_branch: bool,
+) -> Result<()> {
+    let mut body = serde_json::json!({ "merge_method": method });
+    if let Some(sha) = sha {
+        body["sha"] = serde_json::json!(sha);
+    }
+    let result = client
+        .put(&format!("/repos/{repo}/pulls/{number}/merge"), &body)
+        .await?;
+    if result["merged"].as_bool() != Some(true) {
+        bail!(
+            "Merge failed: {}",
+            result["message"]
+                .as_str()
+                .unwrap_or("missing merge confirmation")
+        );
+    }
+    let merge_sha = result["sha"]
+        .as_str()
+        .context("Merge succeeded but response has no SHA")?;
+    println!("Merged {repo}#{number}: {merge_sha}");
+    if delete_branch {
+        delete_head_branch(client, repo, number).await?;
+    }
+    Ok(())
+}
+
+async fn delete_head_branch(client: &Client, repo: &str, number: u64) -> Result<()> {
+    let pr = get_pr(client, repo, number)
+        .await
+        .context("Merged, but failed to inspect head branch")?;
+    let head_repo = pr["head"]["repo"]["full_name"]
+        .as_str()
+        .context("Merged, but head repository is unavailable; branch not deleted")?;
+    if !head_repo.eq_ignore_ascii_case(repo) {
+        println!("Skipped branch deletion: head is in {head_repo}");
+        return Ok(());
+    }
+    let branch = pr["head"]["ref"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .context("Merged, but head branch is unavailable; branch not deleted")?;
+    let path = format!(
+        "/repos/{repo}/git/refs/heads/{}",
+        urlencoding::encode(branch)
+    );
+    client
+        .delete(&path)
+        .await
+        .with_context(|| format!("Merged, but failed to delete branch {branch}"))?;
+    println!("Deleted branch {branch}");
     Ok(())
 }
 
@@ -297,6 +397,10 @@ async fn create_review(
     }
     client.post(&path, &payload).await
 }
+
+#[cfg(test)]
+#[path = "pr_merge_tests.rs"]
+mod merge_tests;
 
 fn print_prs(value: &serde_json::Value) {
     if let Some(prs) = value.as_array() {

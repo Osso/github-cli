@@ -51,7 +51,7 @@ impl Client {
     }
 
     async fn send(&self, method: reqwest::Method, path: &str) -> Result<reqwest::Response> {
-        let url = format!("https://api.github.com{path}");
+        let url = self.endpoint(path);
         let resp = self.http.request(method.clone(), &url).send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
@@ -67,7 +67,7 @@ impl Client {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<reqwest::Response> {
-        let url = format!("https://api.github.com{path}");
+        let url = self.endpoint(path);
         let resp = self
             .http
             .request(method.clone(), &url)
