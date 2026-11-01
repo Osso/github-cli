@@ -1,48 +1,52 @@
 # Issue and PR writes
 
-The CLI supports bounded issue and pull request write actions. The command implementation is in `src/commands/issue.rs` and `src/commands/pr.rs`.
+The CLI creates, edits, closes and reopens issues and pull requests, and posts issue comments. Commands live in `src/commands/issue.rs` and `src/commands/pr.rs`.
 
 ## What it must do
 
 ### Issues
 
-- [ ] `issue create <repo>` requires `--title`/`-t` and accepts optional `--body`/`-b`, `--labels`, and `--assignees`.
-- [ ] `issue edit <repo> <number>` accepts optional `--title`, `--body`, `--labels`, and `--assignees`.
-- [ ] `issue close` and `issue reopen` accept a repo and issue number.
-- [ ] `issue comment <repo> <number>` requires `--message`/`-m`.
+- [x] `issue create <repo>` requires `--title`/`-t` and accepts optional `--body`/`-b`, `--labels`, and `--assignees`.
+- [x] `issue edit <repo> <number>` updates only supplied title, body, labels or assignees.
+- [x] `issue close` and `issue reopen` update the requested issue state.
+- [x] `issue comment <repo> <number>` requires `--message`/`-m` and posts its body.
+- [x] Failed writes return GitHub's error without retrying the mutation.
 
 ### Pull requests
 
-- [ ] `pr create <repo>` requires `--head`, `--base`, and `--title`; it accepts optional `--body`, `--draft`, `--labels`, and `--assignees`.
-- [ ] `pr edit <repo> <number>` accepts optional `--title`, `--body`, `--base`, `--labels`, and `--assignees`.
-- [ ] `pr close` and `pr reopen` accept a repo and PR number.
-- [ ] PR metadata is written separately through the issue endpoint. If that write fails after PR creation or update, the error identifies the already-created or updated PR so creation is not retried blindly.
-- [ ] Existing PR comment, approve, reply, review, and merge actions remain available.
+- [x] `pr create <repo>` requires `--head`, `--base`, and `--title`; it accepts optional `--body`, `--draft`, `--labels`, and `--assignees`.
+- [x] `pr edit <repo> <number>` updates only supplied title, body, base, labels or assignees.
+- [x] `pr close` and `pr reopen` update the requested PR state.
+- [x] PR metadata uses a separate issue-endpoint write. A failure identifies an already-created or updated PR without repeating creation.
+- [x] A failed initial PR write does not attempt a metadata update.
 
 ### Fields
 
-- [ ] On create and edit, `--labels` and `--assignees` accept comma-separated values and replace the full respective sets; an empty string clears the set.
-- [ ] Omitted edit fields remain unchanged, and an empty body edit is accepted.
+- [x] `--labels` and `--assignees` accept comma-separated values and replace full sets; an empty string clears the set.
+- [x] Omitted fields remain unchanged; an empty body edit clears the body.
+- [x] An edit without fields fails before network IO. A metadata-only PR edit does not update pull fields.
 
 ## How it works
 
-- [Issue and PR writes architecture](../wiki/systems/issue-pr-writes.md) (not yet written).
+- [README command examples](../../README.md#issues).
 
 ## Implementation inventory
 
-- `src/commands/issue.rs` — issue commands.
-- `src/commands/pr.rs` — PR commands.
-- `src/commands/issue_fields.rs` — issue metadata fields.
-- `src/client.rs` — API client.
+- `src/commands/issue.rs` — issue commands and writes.
+- `src/commands/pr.rs` — PR commands and writes.
+- `src/commands/issue_fields.rs` — shared label and assignee options.
+- `src/client.rs` — authenticated JSON PATCH, POST and error propagation.
 
 ## Tests asserting this spec
 
-- Not yet verified; the integration owner will identify passing tests.
+- `src/commands/issue_write_tests.rs` — seven local HTTP-fixture and CLI tests.
+- `src/commands/pr_write_tests.rs` — seven local HTTP-fixture and CLI tests.
+- `src/commands/write_test_fixture.rs` — bounded local HTTP fixture; no live mutations.
 
 ## Known gaps (current cycle)
 
-- [ ] Verify the contracts above against the integrated implementation and tests.
+None in the bounded write contract. Remote authorization and repository policy remain GitHub's responsibility.
 
 ## Out of scope
 
-- Additional issue or PR actions: this contract covers the requested bounded write actions and preserves the listed existing PR actions.
+Existing PR comment, approve, reply, review and merge behavior is unchanged. Destructive delete/lock actions and real GitHub mutations solely for testing are excluded.

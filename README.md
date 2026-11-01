@@ -61,7 +61,7 @@ github pr review owner/repo 123 -e APPROVE -b "Looks good"  # Submit review
 github pr review owner/repo 123 -c "path:10:issue here"     # Review with inline comments
 ```
 
-Issue and PR create/edit metadata options `--labels` and `--assignees` replace the full sets. Omit a field to leave it unchanged; pass `''` to clear a set. An empty `--body ''` is accepted for edits.
+Issue and PR create/edit metadata options `--labels` and `--assignees` replace the full sets. Omit a field to leave it unchanged; pass `''` to clear a set. An empty `--body ''` is accepted for edits. An edit with no fields fails without sending an update.
 
 PR metadata is written separately through the issue endpoint. A partial error identifies the PR that was already created or updated; do not retry creation blindly.
 
