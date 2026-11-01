@@ -33,6 +33,11 @@ github issue list owner/repo -S "bug"         # Search issues
 github issue list owner/repo -l 20            # Limit results
 github issue view owner/repo 42               # View issue details
 github issue comments owner/repo 42           # List issue comments
+github issue create owner/repo -t "Title" -b "Body" --labels bug,ui --assignees login1,login2
+github issue edit owner/repo 42 --title "New title" --body "" --labels ''
+github issue close owner/repo 42
+github issue reopen owner/repo 42
+github issue comment owner/repo 42 -m "Comment"
 ```
 
 ### Pull Requests
@@ -41,6 +46,11 @@ github issue comments owner/repo 42           # List issue comments
 github pr list owner/repo                     # List open PRs
 github pr list owner/repo -s closed           # List closed PRs
 github pr view owner/repo 123                 # View PR details
+github pr create owner/repo --head feature --base main --title "Title" --body "Body" --draft --labels bug,ui --assignees login1,login2
+github pr edit owner/repo 123 --title "New title" --base main --assignees ''
+github pr close owner/repo 123
+github pr reopen owner/repo 123
+github pr merge owner/repo 123 --sha <head-sha>  # Merge the reviewed head
 github pr comment owner/repo 123 -m "LGTM"   # Comment on PR
 github pr comments owner/repo 123             # List PR comments
 github pr approve owner/repo 123              # Approve PR
@@ -50,6 +60,10 @@ github pr reply owner/repo 123 --comment ID -m "Fixed"  # Reply to review commen
 github pr review owner/repo 123 -e APPROVE -b "Looks good"  # Submit review
 github pr review owner/repo 123 -c "path:10:issue here"     # Review with inline comments
 ```
+
+Issue and PR create/edit metadata options `--labels` and `--assignees` replace the full sets. Omit a field to leave it unchanged; pass `''` to clear a set. An empty `--body ''` is accepted for edits.
+
+PR metadata is written separately through the issue endpoint. A partial error identifies the PR that was already created or updated; do not retry creation blindly.
 
 ### Reactions
 

@@ -123,6 +123,14 @@ impl Client {
         }
     }
 
+    pub async fn patch(&self, path: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
+        Ok(self
+            .send_json(reqwest::Method::PATCH, path, body)
+            .await?
+            .json()
+            .await?)
+    }
+
     pub async fn delete(&self, path: &str) -> Result<()> {
         self.send(reqwest::Method::DELETE, path).await?;
         Ok(())

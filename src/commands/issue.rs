@@ -1,12 +1,78 @@
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use anyhow::Result;
-use clap::Subcommand;
+use anyhow::{Result, bail};
+use clap::{Args, Subcommand};
+use serde_json::{Value, json};
 
 use crate::client::Client;
+use crate::commands::issue_fields::MetadataArgs;
+
+#[derive(Args)]
+pub struct CreateIssueArgs {
+    /// Issue title
+    #[arg(short, long)]
+    title: String,
+    /// Issue body
+    #[arg(short, long)]
+    body: Option<String>,
+    #[command(flatten)]
+    metadata: MetadataArgs,
+}
+
+#[derive(Args)]
+pub struct EditIssueArgs {
+    /// Replacement title
+    #[arg(short, long)]
+    title: Option<String>,
+    /// Replacement body (empty string clears it)
+    #[arg(short, long)]
+    body: Option<String>,
+    #[command(flatten)]
+    metadata: MetadataArgs,
+}
 
 #[derive(Subcommand)]
 pub enum IssueCommands {
+    /// Create an issue
+    Create {
+        /// Repository (owner/repo)
+        repo: String,
+        #[command(flatten)]
+        fields: CreateIssueArgs,
+    },
+    /// Edit an issue; omitted fields remain unchanged
+    Edit {
+        /// Repository (owner/repo)
+        repo: String,
+        /// Issue number
+        number: u64,
+        #[command(flatten)]
+        fields: EditIssueArgs,
+    },
+    /// Close an issue
+    Close {
+        /// Repository (owner/repo)
+        repo: String,
+        /// Issue number
+        number: u64,
+    },
+    /// Reopen an issue
+    Reopen {
+        /// Repository (owner/repo)
+        repo: String,
+        /// Issue number
+        number: u64,
+    },
+    /// Post a comment on an issue
+    Comment {
+        /// Repository (owner/repo)
+        repo: String,
+        /// Issue number
+        number: u64,
+        /// Comment body
+        #[arg(short, long)]
+        message: String,
+    },
     /// List issues
     List {
         /// Repository (owner/repo)
@@ -36,6 +102,23 @@ pub enum IssueCommands {
 
 pub async fn handle(client: &Client, command: IssueCommands) -> Result<()> {
     match command {
+        IssueCommands::Create { repo, fields } => create_issue(client, &repo, fields).await?,
+        IssueCommands::Edit {
+            repo,
+            number,
+            fields,
+        } => edit_issue(client, &repo, number, fields).await?,
+        IssueCommands::Close { repo, number } => {
+            set_issue_state(client, &repo, number, "closed").await?
+        }
+        IssueCommands::Reopen { repo, number } => {
+            set_issue_state(client, &repo, number, "open").await?
+        }
+        IssueCommands::Comment {
+            repo,
+            number,
+            message,
+        } => post_issue_comment(client, &repo, number, &message).await?,
         IssueCommands::List {
             repo,
             search,
@@ -57,6 +140,67 @@ pub async fn handle(client: &Client, command: IssueCommands) -> Result<()> {
             print_issue_comments(&result);
         }
     }
+    Ok(())
+}
+
+async fn create_issue(client: &Client, repo: &str, fields: CreateIssueArgs) -> Result<()> {
+    let body = issue_body(
+        Some(&fields.title),
+        fields.body.as_deref(),
+        &fields.metadata,
+    );
+    let issue = client.post(&format!("/repos/{repo}/issues"), &body).await?;
+    print_issue_detail(&issue);
+    Ok(())
+}
+
+async fn edit_issue(client: &Client, repo: &str, number: u64, fields: EditIssueArgs) -> Result<()> {
+    let body = issue_body(
+        fields.title.as_deref(),
+        fields.body.as_deref(),
+        &fields.metadata,
+    );
+    if body == json!({}) {
+        bail!("No issue changes supplied; use --title, --body, --labels or --assignees");
+    }
+    let issue = client
+        .patch(&format!("/repos/{repo}/issues/{number}"), &body)
+        .await?;
+    print_issue_detail(&issue);
+    Ok(())
+}
+
+fn issue_body(title: Option<&str>, body: Option<&str>, metadata: &MetadataArgs) -> Value {
+    let mut result = json!({});
+    if let Some(title) = title {
+        result["title"] = json!(title);
+    }
+    if let Some(body) = body {
+        result["body"] = json!(body);
+    }
+    metadata.append_to(&mut result);
+    result
+}
+
+async fn set_issue_state(client: &Client, repo: &str, number: u64, state: &str) -> Result<()> {
+    let issue = client
+        .patch(
+            &format!("/repos/{repo}/issues/{number}"),
+            &json!({"state": state}),
+        )
+        .await?;
+    print_issue_detail(&issue);
+    Ok(())
+}
+
+async fn post_issue_comment(client: &Client, repo: &str, number: u64, message: &str) -> Result<()> {
+    let comment = client
+        .post(
+            &format!("/repos/{repo}/issues/{number}/comments"),
+            &json!({"body": message}),
+        )
+        .await?;
+    println!("Posted comment (id: {}) on {repo}#{number}", comment["id"]);
     Ok(())
 }
 
@@ -141,6 +285,10 @@ pub fn print_issue_comments(value: &serde_json::Value) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "issue_write_tests.rs"]
+mod write_tests;
 
 pub fn print_issue_detail(value: &serde_json::Value) {
     let number = value["number"].as_u64().unwrap_or(0);

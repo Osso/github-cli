@@ -1,13 +1,74 @@
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 use anyhow::{Context, Result, bail};
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 
 use crate::client::Client;
 use crate::commands::issue::{print_issue_comments, print_issue_detail};
+use crate::commands::issue_fields::MetadataArgs;
+
+#[cfg(test)]
+#[path = "pr_write_tests.rs"]
+mod pr_write_tests;
+
+#[derive(Args)]
+pub struct CreatePrArgs {
+    /// Pull request title
+    #[arg(short, long)]
+    title: String,
+    /// Pull request body
+    #[arg(short, long)]
+    body: Option<String>,
+    /// Existing head branch (or owner:branch for a fork)
+    #[arg(long)]
+    head: String,
+    /// Target branch
+    #[arg(long)]
+    base: String,
+    /// Create as a draft
+    #[arg(long)]
+    draft: bool,
+    #[command(flatten)]
+    metadata: MetadataArgs,
+}
+
+#[derive(Args)]
+pub struct EditPrArgs {
+    /// Replacement title
+    #[arg(short, long)]
+    title: Option<String>,
+    /// Replacement body (empty string clears it)
+    #[arg(short, long)]
+    body: Option<String>,
+    /// Replacement target branch
+    #[arg(long)]
+    base: Option<String>,
+    #[command(flatten)]
+    metadata: MetadataArgs,
+}
 
 #[derive(Subcommand)]
 pub enum PrCommands {
+    /// Create a pull request
+    Create {
+        /// Repository (owner/repo)
+        repo: String,
+        #[command(flatten)]
+        fields: CreatePrArgs,
+    },
+    /// Edit a pull request; omitted fields remain unchanged
+    Edit {
+        /// Repository (owner/repo)
+        repo: String,
+        /// Pull request number
+        number: u64,
+        #[command(flatten)]
+        fields: EditPrArgs,
+    },
+    /// Close a pull request
+    Close { repo: String, number: u64 },
+    /// Reopen a pull request
+    Reopen { repo: String, number: u64 },
     /// List pull requests
     List {
         /// Repository (owner/repo)
@@ -115,6 +176,14 @@ pub enum PrCommands {
 
 pub async fn handle(client: &Client, command: PrCommands) -> Result<()> {
     match command {
+        PrCommands::Create { repo, fields } => create_pr(client, &repo, fields).await?,
+        PrCommands::Edit {
+            repo,
+            number,
+            fields,
+        } => edit_pr(client, &repo, number, fields).await?,
+        PrCommands::Close { repo, number } => set_state(client, &repo, number, "closed").await?,
+        PrCommands::Reopen { repo, number } => set_state(client, &repo, number, "open").await?,
         PrCommands::List { repo, state, limit } => {
             handle_list(client, &repo, &state, limit).await?
         }
@@ -163,6 +232,90 @@ pub async fn handle(client: &Client, command: PrCommands) -> Result<()> {
             comments,
         } => handle_review(client, &repo, number, body, event, comments).await?,
     }
+    Ok(())
+}
+
+async fn create_pr(client: &Client, repo: &str, fields: CreatePrArgs) -> Result<()> {
+    let mut payload = serde_json::json!({"title": fields.title, "head": fields.head, "base": fields.base, "draft": fields.draft});
+    if let Some(body) = fields.body {
+        payload["body"] = body.into();
+    }
+    let result = client
+        .post(&format!("/repos/{repo}/pulls"), &payload)
+        .await?;
+    let number = result["number"]
+        .as_u64()
+        .context("Pull request created, but response has no number")?;
+    if !fields.metadata.is_empty() {
+        update_metadata(client, repo, number, &fields.metadata)
+            .await
+            .with_context(|| format!("Created {repo}#{number}, but failed to update metadata"))?;
+    }
+    println!("Created {repo}#{number}");
+    Ok(())
+}
+
+async fn edit_pr(client: &Client, repo: &str, number: u64, fields: EditPrArgs) -> Result<()> {
+    let payload = pr_edit_payload(&fields);
+    let has_pull_changes = payload != serde_json::json!({});
+    if !has_pull_changes && fields.metadata.is_empty() {
+        bail!("No changes specified for {repo}#{number}");
+    }
+    if has_pull_changes {
+        client
+            .patch(&format!("/repos/{repo}/pulls/{number}"), &payload)
+            .await?;
+    }
+    if !fields.metadata.is_empty() {
+        let status = if has_pull_changes {
+            "Updated"
+        } else {
+            "No pull fields changed for"
+        };
+        update_metadata(client, repo, number, &fields.metadata)
+            .await
+            .with_context(|| format!("{status} {repo}#{number}, but failed to update metadata"))?;
+    }
+    println!("Updated {repo}#{number}");
+    Ok(())
+}
+
+fn pr_edit_payload(fields: &EditPrArgs) -> serde_json::Value {
+    let mut payload = serde_json::json!({});
+    if let Some(title) = &fields.title {
+        payload["title"] = title.clone().into();
+    }
+    if let Some(body) = &fields.body {
+        payload["body"] = body.clone().into();
+    }
+    if let Some(base) = &fields.base {
+        payload["base"] = base.clone().into();
+    }
+    payload
+}
+
+async fn update_metadata(
+    client: &Client,
+    repo: &str,
+    number: u64,
+    metadata: &MetadataArgs,
+) -> Result<()> {
+    let mut payload = serde_json::json!({});
+    metadata.append_to(&mut payload);
+    client
+        .patch(&format!("/repos/{repo}/issues/{number}"), &payload)
+        .await?;
+    Ok(())
+}
+
+async fn set_state(client: &Client, repo: &str, number: u64, state: &str) -> Result<()> {
+    client
+        .patch(
+            &format!("/repos/{repo}/pulls/{number}"),
+            &serde_json::json!({"state": state}),
+        )
+        .await?;
+    println!("Set {repo}#{number} state to {state}");
     Ok(())
 }
 
