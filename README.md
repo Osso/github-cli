@@ -46,6 +46,7 @@ github issue comment owner/repo 42 -m "Comment"
 github pr list owner/repo                     # List open PRs
 github pr list owner/repo -s closed           # List closed PRs
 github pr view owner/repo 123                 # View PR details
+github pr branch feature --json               # PR + check counts for a local branch, in its push remote's repo
 github pr create owner/repo --head feature --base main --title "Title" --body "Body" --draft --labels bug,ui --assignees login1,login2
 github pr edit owner/repo 123 --title "New title" --base main --assignees ''
 github pr close owner/repo 123

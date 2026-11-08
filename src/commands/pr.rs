@@ -80,6 +80,14 @@ pub enum PrCommands {
         #[arg(short, long, default_value = "10")]
         limit: u32,
     },
+    /// Show the pull request for a local branch, in the repository the branch is pushed to
+    Branch {
+        /// Local branch name
+        branch: String,
+        /// Print JSON ({number, url, state, checks} or null)
+        #[arg(long)]
+        json: bool,
+    },
     /// View PR details
     View {
         /// Repository (owner/repo)
@@ -186,6 +194,9 @@ pub async fn handle(client: &Client, command: PrCommands) -> Result<()> {
         PrCommands::Reopen { repo, number } => set_state(client, &repo, number, "open").await?,
         PrCommands::List { repo, state, limit } => {
             handle_list(client, &repo, &state, limit).await?
+        }
+        PrCommands::Branch { branch, json } => {
+            crate::commands::pr_branch::handle_branch(client, &branch, json).await?
         }
         PrCommands::View { repo, number } => handle_view(client, &repo, number).await?,
         PrCommands::Comment {

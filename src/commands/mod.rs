@@ -4,6 +4,7 @@ pub mod issue;
 pub(crate) mod issue_fields;
 pub mod org;
 pub mod pr;
+mod pr_branch;
 pub mod repo;
 pub mod run;
 pub mod runner;
