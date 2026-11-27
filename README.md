@@ -163,7 +163,10 @@ github watch list                             # Repositories you watch
 github watch list --owner myorg               # Only repositories owned by myorg
 github watch remove owner/repo other/repo     # Stop watching repositories
 github watch remove --owner myorg             # Stop watching every watched myorg repository
+github watch remove --owner myorg --threads   # Also unsubscribe from existing issue/PR threads
 ```
+
+`--threads` finds thread subscriptions through notification threads (`/notifications?all=true`); threads that never notified you are not found.
 
 The token needs the `notifications` or `repo` scope (classic) or the "Watching" user permission (fine-grained).
 

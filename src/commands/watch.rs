@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use clap::Subcommand;
+use serde_json::Value;
 
 use crate::client::Client;
 
@@ -20,6 +21,9 @@ pub enum WatchCommands {
         /// Stop watching every watched repository owned by this user or organization
         #[arg(short, long, conflicts_with = "repos")]
         owner: Option<String>,
+        /// Also unsubscribe from existing issue/PR notification threads in these repositories
+        #[arg(long)]
+        threads: bool,
     },
 }
 
@@ -30,47 +34,112 @@ pub async fn handle(client: &Client, command: WatchCommands) -> Result<()> {
                 println!("{repo}");
             }
         }
-        WatchCommands::Remove { repos, owner } => {
-            let targets = match owner {
-                Some(owner) => watched_repos(client, Some(&owner)).await?,
-                None if repos.is_empty() => bail!("Pass repositories or --owner"),
-                None => repos,
-            };
-            if targets.is_empty() {
-                println!("No watched repositories matched");
-            }
-            for repo in targets {
-                client
-                    .delete(&format!("/repos/{repo}/subscription"))
-                    .await?;
-                println!("Unwatched {repo}");
+        WatchCommands::Remove {
+            repos,
+            owner,
+            threads,
+        } => {
+            let selection = Selection::new(repos, owner)?;
+            unwatch_repos(client, &selection).await?;
+            if threads {
+                unsubscribe_threads(client, &selection).await?;
             }
         }
     }
     Ok(())
 }
 
+enum Selection {
+    Owner(String),
+    Repos(Vec<String>),
+}
+
+impl Selection {
+    fn new(repos: Vec<String>, owner: Option<String>) -> Result<Self> {
+        match owner {
+            Some(owner) => Ok(Self::Owner(owner)),
+            None if repos.is_empty() => bail!("Pass repositories or --owner"),
+            None => Ok(Self::Repos(repos)),
+        }
+    }
+
+    fn matches(&self, full_name: &str) -> bool {
+        match self {
+            Self::Owner(owner) => owner_matches(full_name, Some(owner)),
+            Self::Repos(repos) => repos
+                .iter()
+                .any(|repo| repo.eq_ignore_ascii_case(full_name)),
+        }
+    }
+}
+
+async fn unwatch_repos(client: &Client, selection: &Selection) -> Result<()> {
+    let targets = match selection {
+        Selection::Owner(owner) => watched_repos(client, Some(owner)).await?,
+        Selection::Repos(repos) => repos.clone(),
+    };
+    if targets.is_empty() {
+        println!("No watched repositories matched");
+    }
+    for repo in targets {
+        client
+            .delete(&format!("/repos/{repo}/subscription"))
+            .await?;
+        println!("Unwatched {repo}");
+    }
+    Ok(())
+}
+
+/// Thread subscriptions are only discoverable through notification threads, so
+/// threads that never produced a notification cannot be found here.
+async fn unsubscribe_threads(client: &Client, selection: &Selection) -> Result<()> {
+    let threads = all_pages(client, "/notifications?all=true").await?;
+    let mut count = 0;
+    for thread in &threads {
+        let repo = thread["repository"]["full_name"]
+            .as_str()
+            .unwrap_or_default();
+        let Some(id) = thread["id"].as_str() else {
+            continue;
+        };
+        if selection.matches(repo) {
+            client
+                .delete(&format!("/notifications/threads/{id}/subscription"))
+                .await?;
+            count += 1;
+        }
+    }
+    println!("Unsubscribed from {count} notification threads");
+    Ok(())
+}
+
 async fn watched_repos(client: &Client, owner: Option<&str>) -> Result<Vec<String>> {
-    let mut names = Vec::new();
+    Ok(all_pages(client, "/user/subscriptions")
+        .await?
+        .iter()
+        .filter_map(|repo| repo["full_name"].as_str())
+        .filter(|name| owner_matches(name, owner))
+        .map(str::to_owned)
+        .collect())
+}
+
+async fn all_pages(client: &Client, path: &str) -> Result<Vec<Value>> {
+    let separator = if path.contains('?') { '&' } else { '?' };
+    let mut items = Vec::new();
     for page in 1.. {
         let value = client
             .get(&format!(
-                "/user/subscriptions?per_page={PAGE_SIZE}&page={page}"
+                "{path}{separator}per_page={PAGE_SIZE}&page={page}"
             ))
             .await?;
-        let repos = value.as_array().map(Vec::as_slice).unwrap_or_default();
-        names.extend(
-            repos
-                .iter()
-                .filter_map(|repo| repo["full_name"].as_str())
-                .filter(|name| owner_matches(name, owner))
-                .map(str::to_owned),
-        );
-        if repos.len() < PAGE_SIZE {
+        let batch = value.as_array().cloned().unwrap_or_default();
+        let done = batch.len() < PAGE_SIZE;
+        items.extend(batch);
+        if done {
             break;
         }
     }
-    Ok(names)
+    Ok(items)
 }
 
 fn owner_matches(full_name: &str, owner: Option<&str>) -> bool {
@@ -121,6 +190,30 @@ mod tests {
         assert!(requests[1].starts_with("GET /user/subscriptions?per_page=100&page=2 "));
         assert!(
             requests[2].starts_with("DELETE /repos/InvenioSoftware/invenio-app/subscription "),
+            "{}",
+            requests[2]
+        );
+        assert_eq!(requests.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn remove_threads_unsubscribes_only_threads_in_selected_repos() {
+        let (client, server) = fixture(vec![
+            ("204 No Content", ""),
+            (
+                "200 OK",
+                r#"[{"id":"11","repository":{"full_name":"Owner/Repo"}},{"id":"22","repository":{"full_name":"owner/other"}}]"#,
+            ),
+            ("204 No Content", ""),
+        ]);
+        handle(&client, command(&["remove", "owner/repo", "--threads"]))
+            .await
+            .unwrap();
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("DELETE /repos/owner/repo/subscription "));
+        assert!(requests[1].starts_with("GET /notifications?all=true&per_page=100&page=1 "));
+        assert!(
+            requests[2].starts_with("DELETE /notifications/threads/11/subscription "),
             "{}",
             requests[2]
         );
