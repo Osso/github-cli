@@ -132,12 +132,13 @@ async fn all_pages(client: &Client, path: &str) -> Result<Vec<Value>> {
                 "{path}{separator}per_page={PAGE_SIZE}&page={page}"
             ))
             .await?;
+        // Endpoints may cap per_page below PAGE_SIZE (notifications caps at 50),
+        // so only an empty page marks the end.
         let batch = value.as_array().cloned().unwrap_or_default();
-        let done = batch.len() < PAGE_SIZE;
-        items.extend(batch);
-        if done {
+        if batch.is_empty() {
             break;
         }
+        items.extend(batch);
     }
     Ok(items)
 }
@@ -165,21 +166,15 @@ mod tests {
         }
     }
 
-    fn full_page(owner: &str) -> &'static str {
-        let repos: Vec<String> = (0..PAGE_SIZE)
-            .map(|i| format!(r#"{{"full_name":"{owner}/repo{i}"}}"#))
-            .collect();
-        Box::leak(format!("[{}]", repos.join(",")).into_boxed_str())
-    }
-
     #[tokio::test]
     async fn remove_by_owner_pages_subscriptions_and_deletes_only_matching_repos() {
         let (client, server) = fixture(vec![
-            ("200 OK", full_page("other")),
+            ("200 OK", r#"[{"full_name":"other/a"}]"#),
             (
                 "200 OK",
                 r#"[{"full_name":"InvenioSoftware/invenio-app"},{"full_name":"other/x"}]"#,
             ),
+            ("200 OK", "[]"),
             ("204 No Content", ""),
         ]);
         handle(&client, command(&["remove", "--owner", "inveniosoftware"]))
@@ -188,22 +183,30 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /user/subscriptions?per_page=100&page=1 "));
         assert!(requests[1].starts_with("GET /user/subscriptions?per_page=100&page=2 "));
+        assert!(requests[2].starts_with("GET /user/subscriptions?per_page=100&page=3 "));
         assert!(
-            requests[2].starts_with("DELETE /repos/InvenioSoftware/invenio-app/subscription "),
+            requests[3].starts_with("DELETE /repos/InvenioSoftware/invenio-app/subscription "),
             "{}",
-            requests[2]
+            requests[3]
         );
-        assert_eq!(requests.len(), 3);
+        assert_eq!(requests.len(), 4);
     }
 
     #[tokio::test]
-    async fn remove_threads_unsubscribes_only_threads_in_selected_repos() {
+    async fn remove_threads_reads_capped_pages_and_unsubscribes_only_selected_repos() {
+        // GitHub caps notifications at 50 per page, below the requested 100.
         let (client, server) = fixture(vec![
             ("204 No Content", ""),
             (
                 "200 OK",
                 r#"[{"id":"11","repository":{"full_name":"Owner/Repo"}},{"id":"22","repository":{"full_name":"owner/other"}}]"#,
             ),
+            (
+                "200 OK",
+                r#"[{"id":"33","repository":{"full_name":"owner/repo"}}]"#,
+            ),
+            ("200 OK", "[]"),
+            ("204 No Content", ""),
             ("204 No Content", ""),
         ]);
         handle(&client, command(&["remove", "owner/repo", "--threads"]))
@@ -212,12 +215,15 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("DELETE /repos/owner/repo/subscription "));
         assert!(requests[1].starts_with("GET /notifications?all=true&per_page=100&page=1 "));
+        assert!(requests[2].starts_with("GET /notifications?all=true&per_page=100&page=2 "));
+        assert!(requests[3].starts_with("GET /notifications?all=true&per_page=100&page=3 "));
         assert!(
-            requests[2].starts_with("DELETE /notifications/threads/11/subscription "),
+            requests[4].starts_with("DELETE /notifications/threads/11/subscription "),
             "{}",
-            requests[2]
+            requests[4]
         );
-        assert_eq!(requests.len(), 3);
+        assert!(requests[5].starts_with("DELETE /notifications/threads/33/subscription "));
+        assert_eq!(requests.len(), 6);
     }
 
     #[tokio::test]
