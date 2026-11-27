@@ -156,6 +156,17 @@ github code search "pattern" -l 50            # Limit results
 github app list myorg                         # List app installations
 ```
 
+### Watching (notification subscriptions)
+
+```bash
+github watch list                             # Repositories you watch
+github watch list --owner myorg               # Only repositories owned by myorg
+github watch remove owner/repo other/repo     # Stop watching repositories
+github watch remove --owner myorg             # Stop watching every watched myorg repository
+```
+
+The token needs the `notifications` or `repo` scope (classic) or the "Watching" user permission (fine-grained).
+
 ### Configuration
 
 ```bash

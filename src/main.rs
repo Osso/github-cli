@@ -20,6 +20,7 @@ use commands::run::RunCommands;
 use commands::runner::RunnerCommands;
 use commands::secret::SecretCommands;
 use commands::team::TeamCommands;
+use commands::watch::WatchCommands;
 use commands::webhook::WebhookCommands;
 
 #[derive(Parser)]
@@ -95,6 +96,11 @@ enum Commands {
     Webhook {
         #[command(subcommand)]
         command: WebhookCommands,
+    },
+    /// Manage repository watch (notification) subscriptions
+    Watch {
+        #[command(subcommand)]
+        command: WatchCommands,
     },
     /// Configure token
     Config {
@@ -185,6 +191,7 @@ async fn handle_authenticated_command(client: &Client, command: Commands) -> Res
         Commands::Code { command } => commands::code::handle(client, command).await,
         Commands::Secret { command } => commands::secret::handle(client, command).await,
         Commands::Webhook { command } => commands::webhook::handle(client, command).await,
+        Commands::Watch { command } => commands::watch::handle(client, command).await,
         Commands::Config { .. } => unreachable!("config command handled in main"),
     }
 }

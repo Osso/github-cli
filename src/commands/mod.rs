@@ -10,6 +10,7 @@ pub mod run;
 pub mod runner;
 pub mod secret;
 pub mod team;
+pub mod watch;
 pub mod webhook;
 
 #[cfg(test)]
